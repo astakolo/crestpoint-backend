@@ -89,30 +89,30 @@ ASGI_APPLICATION = "crestpoint_credit.asgi.application"
 # For local dev, SQLite (the default here) works out of the box.
 # ==============================
 
-DATABASES = {
-    "default": {
-        "ENGINE": os.environ.get("DB_ENGINE", "django.db.backends.sqlite3"),
-        "NAME": os.environ.get("DB_NAME", str(BASE_DIR / "db.sqlite3")),
-        "USER": os.environ.get("DB_USER", ""),           # Postgres only
-        "PASSWORD": os.environ.get("DB_PASSWORD", ""),   # Postgres only
-        "HOST": os.environ.get("DB_HOST", ""),           # e.g. db.aymvwwemwijpdybqqpsu.supabase.co
-        "PORT": os.environ.get("DB_PORT", ""),           # e.g. 5432
-        "CONN_MAX_AGE": int(os.environ.get("DB_CONN_MAX_AGE", "0")),
-    }
-}
-
-# --- SUPABASE POSTGRES (uncomment and fill in to use) ---
 # DATABASES = {
 #     "default": {
-#         "ENGINE": "django.db.backends.postgresql",
-#         "NAME": "postgres",
-#         "USER": "postgres",
-#         "PASSWORD": "your-password-here",
-#         "HOST": "db.aymvwwemwijpdybqqpsu.supabase.co",
-#         "PORT": "5432",
-#         "CONN_MAX_AGE": 60,
+#         "ENGINE": os.environ.get("DB_ENGINE", "django.db.backends.sqlite3"),
+#         "NAME": os.environ.get("DB_NAME", str(BASE_DIR / "db.sqlite3")),
+#         "USER": os.environ.get("DB_USER", ""),           # Postgres only
+#         "PASSWORD": os.environ.get("DB_PASSWORD", ""),   # Postgres only
+#         "HOST": os.environ.get("DB_HOST", ""),           # e.g. db.aymvwwemwijpdybqqpsu.supabase.co
+#         "PORT": os.environ.get("DB_PORT", ""),           # e.g. 5432
+#         "CONN_MAX_AGE": int(os.environ.get("DB_CONN_MAX_AGE", "0")),
 #     }
 # }
+
+# --- SUPABASE POSTGRES (uncomment and fill in to use) ---
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.environ.get("DB_NAME",""),
+        "USER": os.environ.get("DB_USER", ""),
+        "PASSWORD": os.environ.get("DB_PASSWORD", ""),
+        "HOST": os.environ.get("DB_HOST", ""),
+        "PORT": os.environ.get("DB_PORT", ""),
+        "CONN_MAX_AGE": 60,
+    }
+}
 
 # ==============================
 # CACHING
