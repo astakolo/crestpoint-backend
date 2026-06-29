@@ -1,3 +1,5 @@
+import secrets
+
 from django.db import models
 from django.conf import settings
 
@@ -133,3 +135,58 @@ class WithdrawalRequest(TimestampedModel):
 
     def __str__(self):
         return f"{self.reference} - {self.status}"
+
+
+class WithdrawalOTP(models.Model):
+    """One-time password issued by admin for a user's withdrawal request.
+
+    An OTP is valid for ``OTP_TTL_MINUTES`` minutes after creation and can only
+    be used once (``is_used`` flag).  Only one *active* (unused, non-expired)
+    OTP may exist per user at a time — generating a new one invalidates any
+    previous active code.
+    """
+
+    OTP_TTL_MINUTES = 30
+
+    id = models.BigAutoField(primary_key=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="withdrawal_otps",
+        db_index=True,
+    )
+    code = models.CharField(max_length=8, editable=False)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="generated_withdrawal_otps",
+    )
+    is_used = models.BooleanField(default=False)
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "withdrawal_otps"
+        ordering = ["-created_at"]
+
+    def save(self, *args, **kwargs):
+        if not self.code:
+            self.code = secrets.token_hex(3).upper()  # 6-char hex, e.g. A3F1B2
+        super().save(*args, **kwargs)
+
+    @property
+    def is_expired(self):
+        from django.utils import timezone
+        from datetime import timedelta
+        if not self.created_at:
+            return True
+        return timezone.now() > self.created_at + timedelta(minutes=self.OTP_TTL_MINUTES)
+
+    @property
+    def is_active(self):
+        return not self.is_used and not self.is_expired
+
+    def __str__(self):
+        return f"OTP {self.code} for {self.user.email}"

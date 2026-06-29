@@ -22,7 +22,7 @@ from crestpoint_credit.core.exceptions import (
     TransferLimitExceededError,
     InvalidTransferError,
 )
-from .models import Transaction, WithdrawalRequest, WithdrawalRequestStatus
+from .models import Transaction, WithdrawalOTP, WithdrawalRequest, WithdrawalRequestStatus
 from .serializers import (
     DepositSerializer,
     WithdrawalSerializer,
@@ -583,6 +583,12 @@ class WithdrawalRequestCreateView(APIView):
 
         account = serializer._account
         amount = serializer.validated_data["amount"]
+        otp = serializer._otp
+
+        # Mark OTP as used
+        otp.is_used = True
+        otp.used_at = timezone.now()
+        otp.save(update_fields=["is_used", "used_at"])
 
         wr = WithdrawalRequest.objects.create(
             account=account,
@@ -592,14 +598,16 @@ class WithdrawalRequestCreateView(APIView):
             account_number=serializer.validated_data.get("account_number", ""),
             routing_number=serializer.validated_data.get("routing_number", ""),
             status=WithdrawalRequestStatus.PENDING,
+            metadata={"otp_id": otp.id},
         )
 
         logger.info(
-            "Withdrawal request %s created by %s for account %s – amount: %s",
+            "Withdrawal request %s created by %s for account %s – amount: %s (OTP %s)",
             wr.reference,
             request.user.email,
             account.account_number,
             amount,
+            otp.code,
         )
 
         return Response(
@@ -760,3 +768,59 @@ class AdminReviewWithdrawalView(APIView, _OperationViewMixin):
                 },
                 status=status.HTTP_200_OK,
             )
+
+
+# ────────────────────────────────────────────────────────────────────
+# Admin: Generate Withdrawal OTP
+# ────────────────────────────────────────────────────────────────────
+
+class AdminGenerateWithdrawalOTPView(APIView):
+    """
+    POST /transactions/withdrawal-requests/generate-otp/
+    Admin generates a one-time OTP for a user. The user must provide
+    this OTP when creating a withdrawal request.
+
+    Body: {"user_id": <int>}
+    Response: {"code": "A3F1B2", "expires_at": "...", "user_email": "..."}
+    """
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def post(self, request):
+        from .serializers import GenerateWithdrawalOTPSerializer
+        from crestpoint_credit.accounts.models import User
+
+        serializer = GenerateWithdrawalOTPSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user_id = serializer.validated_data["user_id"]
+        user = User.objects.get(pk=user_id)
+
+        # Invalidate any previous active OTPs for this user
+        WithdrawalOTP.objects.filter(
+            user=user, is_used=False
+        ).update(is_used=True)
+
+        # Create new OTP
+        otp = WithdrawalOTP.objects.create(
+            user=user,
+            created_by=request.user,
+        )
+
+        from datetime import timedelta
+        expires_at = otp.created_at + timedelta(minutes=WithdrawalOTP.OTP_TTL_MINUTES)
+
+        logger.info(
+            "Withdrawal OTP %s generated for user %s by admin %s",
+            otp.code, user.email, request.user.email,
+        )
+
+        return Response(
+            {
+                "code": otp.code,
+                "expires_at": expires_at.isoformat(),
+                "user_id": user.id,
+                "user_email": user.email,
+                "user_full_name": f"{user.first_name} {user.last_name}".strip(),
+            },
+            status=status.HTTP_201_CREATED,
+        )

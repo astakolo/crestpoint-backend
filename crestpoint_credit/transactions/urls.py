@@ -23,5 +23,6 @@ urlpatterns = [
     path("withdrawal-requests/<int:pk>/", views.WithdrawalRequestDetailView.as_view(), name="withdrawal-request-detail"),
     path("withdrawal-requests/admin/", views.AdminWithdrawalRequestListView.as_view(), name="admin-withdrawal-request-list"),
     path("withdrawal-requests/<int:pk>/review/", views.AdminReviewWithdrawalView.as_view(), name="admin-review-withdrawal"),
+    path("withdrawal-requests/generate-otp/", views.AdminGenerateWithdrawalOTPView.as_view(), name="admin-generate-withdrawal-otp"),
     path("", include(router.urls)),
 ]
