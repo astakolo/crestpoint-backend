@@ -9,7 +9,7 @@ from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
+    path("letmein/", admin.site.urls),
     # API authentication
     path("api/auth/", include("crestpoint_credit.security.urls")),
     # API endpoints
