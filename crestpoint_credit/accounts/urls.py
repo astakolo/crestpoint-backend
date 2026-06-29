@@ -8,6 +8,7 @@ router.register(r"accounts", views.BankAccountViewSet, basename="bank-account")
 
 urlpatterns = [
     path("", include(router.urls)),
+    path("register/", views.RegisterView.as_view(), name="register"),
     path("profile/", views.UserDetailView.as_view(), name="user-profile"),
     path("change-password/", views.ChangePasswordView.as_view(), name="change-password"),
     path("kyc/upload/", views.KYCUploadView.as_view(), name="kyc-upload"),
