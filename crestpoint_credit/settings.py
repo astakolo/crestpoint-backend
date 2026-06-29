@@ -19,7 +19,7 @@ SECRET_KEY = os.environ.get(
 DEBUG = os.environ.get("DJANGO_DEBUG", "False").lower() == "true"
 
 ALLOWED_HOSTS = os.environ.get(
-    "DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,backend"
+    "DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,backend,crestpoint-backend.vercel.app"
 ).split(",")
 
 # Application definition
@@ -242,7 +242,7 @@ MEDIA_ROOT = BASE_DIR / "media"
 # ==============================
 CORS_ALLOWED_ORIGINS = os.environ.get(
     "CORS_ALLOWED_ORIGINS",
-    "http://localhost:3000,http://127.0.0.1:3000",
+    "http://localhost:3000,http://127.0.0.1:3000,https://crestpoint-backend.vercel.app",
 ).split(",")
 CORS_ALLOW_CREDENTIALS = True
 CORS_PREFLIGHT_MAX_AGE = 86400
