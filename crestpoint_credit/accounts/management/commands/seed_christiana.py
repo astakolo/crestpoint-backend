@@ -7,7 +7,7 @@ Usage:
 Creates:
   - User: Christiana Black (christiana.black@crestpointcredit.com / Black@2024)
   - Savings account with $79,000 balance
-  - 6 months of transaction history (Jan 2026 - Jun 2026)
+  - 6 months of transaction history (Oct 2025 - Mar 2026)
   - A pending withdrawal request for admin to approve/reject
 """
 
@@ -21,7 +21,7 @@ from django.utils import timezone
 from django.contrib.auth.hashers import make_password
 
 from crestpoint_credit.accounts.models import User, BankAccount
-from crestpoint_credit.transactions.models import Transaction, TransactionType, TransactionStatus
+from crestpoint_credit.transactions.models import Transaction, TransactionType, TransactionStatus, WithdrawalRequest, WithdrawalRequestStatus
 
 
 class Command(BaseCommand):
@@ -35,7 +35,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        email = "christiana.black@crestpointcredit.com"
+        email = "c45562766@gmail.com"
         password = options["password"]
 
         # ── 1. Create or get user ──
@@ -85,7 +85,8 @@ class Command(BaseCommand):
 
         # ── 4. Generate 6 months of transaction history ──
         now = timezone.now()
-        start_date = now.replace(year=2026, month=1, day=1, hour=9, minute=0, second=0, microsecond=0)
+        start_date = now.replace(year=2025, month=11, day=1, hour=9, minute=0, second=0, microsecond=0)
+        end_date = now.replace(year=2026, month=3, day=31, hour=23, minute=59, second=0, microsecond=0)
 
         # Transaction templates with realistic descriptions
         deposit_descs = [
@@ -122,11 +123,11 @@ class Command(BaseCommand):
         current_date = start_date
 
         # Generate ~120 transactions over 6 months
-        while current_date <= now:
+        while current_date <= end_date:
             # 2-6 transactions per week
             weekly_txns = random.randint(2, 5)
             for _ in range(weekly_txns):
-                if current_date > now:
+                if current_date > end_date:
                     break
 
                 is_deposit = random.random() < 0.35  # 35% deposits, 65% withdrawals
@@ -171,24 +172,28 @@ class Command(BaseCommand):
         # ── 5. Set final balance to $79,000 ──
         account.balance = Decimal("79000.00")
         account.save()
-        self.stdout.write(self.style.SUCCESS(f"  Generated {txn_count} transactions (Jan-Jun 2026)"))
+        self.stdout.write(self.style.SUCCESS(f"  Generated {txn_count} transactions (Oct 2025 - Mar 2026)"))
         self.stdout.write(self.style.SUCCESS(f"  Balance set to $79,000.00"))
 
-        # ── 6. Create a PENDING withdrawal request ──
+        # ── 6. Create a PENDING WithdrawalRequest for admin to approve/reject ──
         pending_amount = Decimal("4500.00")
-        pending_txn = Transaction.objects.create(
+        wr, wr_created = WithdrawalRequest.objects.get_or_create(
             account=account,
-            transaction_type=TransactionType.WITHDRAWAL,
-            status=TransactionStatus.PENDING,
-            amount=pending_amount,
-            description="Withdrawal request - pending admin approval",
-            balance_before=Decimal("79000.00"),
-            balance_after=Decimal("79000.00"),  # Balance doesn't change until approved
-            metadata={"pending_reason": "Awaiting admin review"},
+            status=WithdrawalRequestStatus.PENDING,
+            defaults={
+                "amount": pending_amount,
+                "description": "Withdrawal to external bank account",
+                "bank_name": "Chase Bank",
+                "account_number": "****4521",
+                "routing_number": "021000021",
+            },
         )
-        self.stdout.write(self.style.WARNING(
-            f"  Created PENDING withdrawal: ${pending_amount} (TXN #{pending_txn.id}, ref: {pending_txn.reference})"
-        ))
+        if wr_created:
+            self.stdout.write(self.style.WARNING(
+                f"  Created PENDING withdrawal request: ${pending_amount} (ref: {wr.reference})"
+            ))
+        else:
+            self.stdout.write(f"  Pending withdrawal request already exists: {wr.reference}")
 
         # ── 7. Summary ──
         total_deposits = Transaction.objects.filter(
@@ -199,6 +204,9 @@ class Command(BaseCommand):
         ).count()
         pending_count = Transaction.objects.filter(
             account=account, status=TransactionStatus.PENDING
+        ).count()
+        wr_pending_count = WithdrawalRequest.objects.filter(
+            account=account, status=WithdrawalRequestStatus.PENDING
         ).count()
 
         self.stdout.write("")
@@ -212,7 +220,8 @@ class Command(BaseCommand):
         self.stdout.write(f"  Completed Deposits: {total_deposits}")
         self.stdout.write(f"  Completed Withdrawals: {total_withdrawals}")
         self.stdout.write(f"  Pending Withdrawals:  {pending_count}")
+        self.stdout.write(f"  Pending Withdrawal Requests: {wr_pending_count}")
         self.stdout.write("")
         self.stdout.write("  Login with these credentials to see the dashboard.")
-        self.stdout.write("  The pending withdrawal will appear in transaction history")
-        self.stdout.write("  and can be approved/rejected by the admin.")
+        self.stdout.write("  The pending withdrawal request can be approved/rejected by the admin")
+        self.stdout.write("  via POST /api/transactions/withdrawal-requests/<id>/review/")

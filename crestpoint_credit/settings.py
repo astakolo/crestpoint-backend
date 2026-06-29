@@ -105,11 +105,11 @@ ASGI_APPLICATION = "crestpoint_credit.asgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ.get("DB_NAME"),
-        "USER": os.environ.get("DB_USER"),
-        "PASSWORD": os.environ.get("DB_PASSWORD"),
-        "HOST": os.environ.get("DB_HOST"),
-        "PORT": os.environ.get("DB_PORT"),
+        "NAME": "postgres",
+        "USER": "postgres.aymvwwemwijpdybqqpsu",
+        "PASSWORD": "EmX3STJi6pQj",
+        "HOST": "aws-1-eu-central-2.pooler.supabase.com",
+        "PORT": "5432",
         "CONN_MAX_AGE": 60,
     }
 }
