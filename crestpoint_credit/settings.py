@@ -19,7 +19,7 @@ SECRET_KEY = os.environ.get(
 DEBUG = os.environ.get("DJANGO_DEBUG", "False").lower() == "true"
 
 ALLOWED_HOSTS = os.environ.get(
-    "DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,backend,crestpoint-backend.vercel.app"
+    "DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,backend,crestpoint-backend.vercel.app,api.crestpointcredit.online"
 ).split(",")
 
 # Application definition
