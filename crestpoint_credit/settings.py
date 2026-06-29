@@ -19,7 +19,7 @@ SECRET_KEY = os.environ.get(
 DEBUG = os.environ.get("DJANGO_DEBUG", "False").lower() == "true"
 
 ALLOWED_HOSTS = os.environ.get(
-    "DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,backend,crestpoint-backend.vercel.app,api.crestpointcredit.online"
+    "DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,backend,crestpoint-backend.vercel.app,api.crestpointcredit.online,crestpointcredit.online"
 ).split(",")
 
 # Application definition
@@ -51,7 +51,8 @@ MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
-    "django.middleware.csrf.CsrfViewMiddleware",
+    # CsrfViewMiddleware removed — pure API backend uses JWT auth,
+    # not session/cookie auth. DRF's JSONParser handles request bodies.
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -191,7 +192,11 @@ REST_FRAMEWORK = {
         "transaction": "30/minute",
     },
     "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",),
-    "DEFAULT_PARSER_CLASSES": ("rest_framework.parsers.JSONParser",),
+    "DEFAULT_PARSER_CLASSES": (
+        "rest_framework.parsers.JSONParser",
+        "rest_framework.parsers.FormParser",
+        "rest_framework.parsers.MultiPartParser",
+    ),
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_EXCEPTION_HANDLER": "crestpoint_credit.core.exceptions.custom_exception_handler",
     "NON_FIELD_ERRORS_KEY": "error",
@@ -242,7 +247,7 @@ MEDIA_ROOT = BASE_DIR / "media"
 # ==============================
 CORS_ALLOWED_ORIGINS = os.environ.get(
     "CORS_ALLOWED_ORIGINS",
-    "http://localhost:3000,http://127.0.0.1:3000,https://crestpoint-backend.vercel.app",
+    "http://localhost:3000,http://127.0.0.1:3000,https://crestpoint-backend.vercel.app,https://api.crestpointcredit.online,https://crestpointcredit.online",
 ).split(",")
 CORS_ALLOW_CREDENTIALS = True
 CORS_PREFLIGHT_MAX_AGE = 86400

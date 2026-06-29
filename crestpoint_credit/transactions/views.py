@@ -2,6 +2,7 @@ import logging
 
 from django.http import Http404
 from django.utils.decorators import method_decorator
+from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import status, filters, generics
@@ -21,13 +22,17 @@ from crestpoint_credit.core.exceptions import (
     TransferLimitExceededError,
     InvalidTransferError,
 )
-from .models import Transaction
+from .models import Transaction, WithdrawalRequest, WithdrawalRequestStatus
 from .serializers import (
     DepositSerializer,
     WithdrawalSerializer,
     TransferSerializer,
     TransactionSerializer,
     TransactionDetailSerializer,
+    WithdrawalRequestCreateSerializer,
+    WithdrawalRequestSerializer,
+    WithdrawalRequestAdminSerializer,
+    AdminReviewWithdrawalSerializer,
 )
 from .services import (
     execute_deposit,
@@ -553,3 +558,205 @@ class AdminCSVExportView(APIView):
         )
         response["Content-Disposition"] = 'attachment; filename="transactions_export.csv"'
         return response
+
+
+# ---------------------------------------------------------------------------
+# Withdrawal Request views (user-facing)
+# ---------------------------------------------------------------------------
+
+@method_decorator(never_cache, name="dispatch")
+class WithdrawalRequestCreateView(APIView):
+    """
+    POST /transactions/withdrawal-requests/
+    User creates a withdrawal request. It stays 'pending' until an admin
+    approves or rejects it.
+    """
+
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [TransactionRateThrottle]
+
+    def post(self, request):
+        serializer = WithdrawalRequestCreateSerializer(
+            data=request.data, context={"request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+
+        account = serializer._account
+        amount = serializer.validated_data["amount"]
+
+        wr = WithdrawalRequest.objects.create(
+            account=account,
+            amount=amount,
+            description=serializer.validated_data.get("description", ""),
+            bank_name=serializer.validated_data.get("bank_name", ""),
+            account_number=serializer.validated_data.get("account_number", ""),
+            routing_number=serializer.validated_data.get("routing_number", ""),
+            status=WithdrawalRequestStatus.PENDING,
+        )
+
+        logger.info(
+            "Withdrawal request %s created by %s for account %s – amount: %s",
+            wr.reference,
+            request.user.email,
+            account.account_number,
+            amount,
+        )
+
+        return Response(
+            WithdrawalRequestSerializer(wr).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class WithdrawalRequestListView(generics.ListAPIView):
+    """
+    GET /transactions/withdrawal-requests/
+    List the authenticated user's withdrawal requests.
+    """
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = WithdrawalRequestSerializer
+    ordering = ["-created_at"]
+
+    def get_queryset(self):
+        account_ids = BankAccount.objects.filter(
+            user=self.request.user
+        ).values_list("id", flat=True)
+        qs = WithdrawalRequest.objects.filter(account_id__in=account_ids)
+
+        wr_status = self.request.query_params.get("status")
+        if wr_status:
+            qs = qs.filter(status=wr_status)
+
+        return qs
+
+
+class WithdrawalRequestDetailView(generics.RetrieveAPIView):
+    """
+    GET /transactions/withdrawal-requests/<pk>/
+    Retrieve a single withdrawal request (own requests only).
+    """
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = WithdrawalRequestSerializer
+
+    def get_queryset(self):
+        account_ids = BankAccount.objects.filter(
+            user=self.request.user
+        ).values_list("id", flat=True)
+        return WithdrawalRequest.objects.filter(account_id__in=account_ids)
+
+
+# ---------------------------------------------------------------------------
+# Withdrawal Request views (admin)
+# ---------------------------------------------------------------------------
+
+class AdminWithdrawalRequestListView(generics.ListAPIView):
+    """
+    GET /transactions/withdrawal-requests/admin/
+    Admin can list all withdrawal requests, optionally filtered by status.
+    """
+
+    permission_classes = [IsAuthenticated, IsAdminRole]
+    serializer_class = WithdrawalRequestAdminSerializer
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["reference", "account__account_number", "account__user__email"]
+    ordering_fields = ["created_at", "amount"]
+    ordering = ["-created_at"]
+
+    def get_queryset(self):
+        qs = WithdrawalRequest.objects.select_related("account", "account__user", "reviewed_by")
+
+        wr_status = self.request.query_params.get("status")
+        if wr_status:
+            qs = qs.filter(status=wr_status)
+
+        return qs
+
+
+class AdminReviewWithdrawalView(APIView, _OperationViewMixin):
+    """
+    POST /transactions/withdrawal-requests/<pk>/review/
+    Admin approves or rejects a pending withdrawal request.
+
+    On approve: funds are deducted from the user's account and a completed
+    withdrawal Transaction is created.
+    On reject: no balance change; the rejection reason is stored.
+    """
+
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def post(self, request, pk):
+        try:
+            wr = WithdrawalRequest.objects.select_related("account").get(pk=pk)
+        except WithdrawalRequest.DoesNotExist:
+            return Response(
+                {"detail": "Withdrawal request not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if wr.status != WithdrawalRequestStatus.PENDING:
+            return Response(
+                {"detail": f"This request is already {wr.status} and cannot be reviewed again."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = AdminReviewWithdrawalSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        action = serializer.validated_data["action"]
+        rejection_reason = serializer.validated_data.get("rejection_reason", "")
+
+        if action == "approve":
+            try:
+                txn = execute_withdrawal(
+                    wr.account,
+                    wr.amount,
+                    description=f"Withdrawal request {wr.reference}",
+                )
+                wr.status = WithdrawalRequestStatus.APPROVED
+                wr.reviewed_by = request.user
+                wr.reviewed_at = timezone.now()
+                wr.metadata = {**wr.metadata, "transaction_id": txn.id}
+                wr.save()
+
+                logger.info(
+                    "Withdrawal request %s APPROVED by %s – transaction %s",
+                    wr.reference,
+                    request.user.email,
+                    txn.reference,
+                )
+
+                return Response(
+                    {
+                        "message": "Withdrawal request approved and processed.",
+                        "request": WithdrawalRequestAdminSerializer(wr).data,
+                        "transaction": TransactionSerializer(txn).data,
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+            except Exception as exc:
+                return self._handle_service_error(exc)
+
+        elif action == "reject":
+            wr.status = WithdrawalRequestStatus.REJECTED
+            wr.reviewed_by = request.user
+            wr.reviewed_at = timezone.now()
+            wr.rejection_reason = rejection_reason
+            wr.save()
+
+            logger.info(
+                "Withdrawal request %s REJECTED by %s – reason: %s",
+                wr.reference,
+                request.user.email,
+                rejection_reason,
+            )
+
+            return Response(
+                {
+                    "message": "Withdrawal request rejected.",
+                    "request": WithdrawalRequestAdminSerializer(wr).data,
+                },
+                status=status.HTTP_200_OK,
+            )

@@ -8,7 +8,7 @@ from crestpoint_credit.core.exceptions import (
     AccountLockedError,
     InvalidTransferError,
 )
-from .models import Transaction
+from .models import Transaction, WithdrawalRequest, WithdrawalRequestStatus
 
 
 # ---------------------------------------------------------------------------
@@ -191,3 +191,153 @@ class TransactionDetailSerializer(TransactionSerializer):
             "recipient_account",
             "metadata",
         ]
+
+
+# ---------------------------------------------------------------------------
+# Withdrawal Request serializers
+# ---------------------------------------------------------------------------
+
+
+class WithdrawalRequestCreateSerializer(serializers.Serializer):
+    """Validates input for creating a new withdrawal request."""
+
+    account_id = serializers.IntegerField(help_text="ID of the bank account to withdraw from.")
+    amount = _AmountField(max_digits=15, decimal_places=2)
+    description = serializers.CharField(required=False, default="", allow_blank=True)
+    bank_name = serializers.CharField(required=False, default="", allow_blank=True, max_length=200)
+    account_number = serializers.CharField(required=False, default="", allow_blank=True, max_length=50)
+    routing_number = serializers.CharField(required=False, default="", allow_blank=True, max_length=50)
+
+    def validate_account_id(self, value):
+        request = self.context.get("request")
+        try:
+            account = BankAccount.objects.get(pk=value)
+        except BankAccount.DoesNotExist:
+            raise serializers.ValidationError("Account does not exist.")
+
+        if request and account.user_id != request.user.id:
+            raise serializers.ValidationError("This account does not belong to you.")
+
+        if not account.is_active:
+            raise serializers.ValidationError("This account is not active.")
+
+        if account.is_frozen:
+            raise serializers.ValidationError(
+                "This account is frozen and cannot process withdrawal requests."
+            )
+
+        self._account = account
+        return value
+
+    def validate(self, attrs):
+        account = getattr(self, "_account", None)
+        amount = attrs.get("amount")
+
+        if account and amount:
+            if account.balance < amount:
+                raise serializers.ValidationError(
+                    {"amount": "Insufficient funds for this withdrawal request."}
+                )
+
+            # Check for existing pending withdrawal requests for this account
+            pending_exists = WithdrawalRequest.objects.filter(
+                account=account,
+                status=WithdrawalRequestStatus.PENDING,
+            ).exists()
+            if pending_exists:
+                raise serializers.ValidationError(
+                    {"non_field_errors": [
+                        "You already have a pending withdrawal request for this account. "
+                        "Please wait for it to be reviewed before submitting another."
+                    ]}
+                )
+
+        return attrs
+
+
+class WithdrawalRequestSerializer(serializers.ModelSerializer):
+    """Read serializer for withdrawal requests (user-facing list/detail)."""
+
+    cp_account_number = serializers.CharField(
+        source="account.account_number", read_only=True
+    )
+
+    class Meta:
+        model = WithdrawalRequest
+        fields = [
+            "id",
+            "reference",
+            "cp_account_number",
+            "amount",
+            "status",
+            "description",
+            "bank_name",
+            "account_number",
+            "routing_number",
+            "rejection_reason",
+            "created_at",
+            "reviewed_at",
+        ]
+        read_only_fields = fields
+
+
+class WithdrawalRequestAdminSerializer(serializers.ModelSerializer):
+    """Extended serializer for admin views showing user info."""
+
+    cp_account_number = serializers.CharField(
+        source="account.account_number", read_only=True
+    )
+    user_email = serializers.EmailField(
+        source="account.user.email", read_only=True
+    )
+    user_full_name = serializers.SerializerMethodField()
+    reviewer_email = serializers.EmailField(
+        source="reviewed_by.email", read_only=True, default=None
+    )
+
+    class Meta:
+        model = WithdrawalRequest
+        fields = [
+            "id",
+            "reference",
+            "cp_account_number",
+            "user_email",
+            "user_full_name",
+            "amount",
+            "status",
+            "description",
+            "bank_name",
+            "account_number",
+            "routing_number",
+            "rejection_reason",
+            "reviewer_email",
+            "created_at",
+            "reviewed_at",
+        ]
+        read_only_fields = fields
+
+    def get_user_full_name(self, obj):
+        user = obj.account.user
+        return f"{user.first_name} {user.last_name}".strip()
+
+
+class AdminReviewWithdrawalSerializer(serializers.Serializer):
+    """Validates admin approve/reject input."""
+
+    action = serializers.ChoiceField(
+        choices=["approve", "reject"],
+        help_text="'approve' to process the withdrawal, 'reject' to deny it.",
+    )
+    rejection_reason = serializers.CharField(
+        required=False,
+        default="",
+        allow_blank=True,
+        help_text="Required when action is 'reject'.",
+    )
+
+    def validate(self, attrs):
+        if attrs["action"] == "reject" and not attrs.get("rejection_reason", "").strip():
+            raise serializers.ValidationError(
+                {"rejection_reason": "A rejection reason is required when rejecting a withdrawal request."}
+            )
+        return attrs

@@ -17,5 +17,11 @@ urlpatterns = [
     path("<int:pk>/reverse/", views.ReverseTransactionView.as_view(), name="reverse-transaction"),
     path("admin/stats/", views.AdminTransactionStatsView.as_view(), name="admin-transaction-stats"),
     path("admin/export-csv/", views.AdminCSVExportView.as_view(), name="admin-export-csv"),
+    # Withdrawal requests
+    path("withdrawal-requests/", views.WithdrawalRequestCreateView.as_view(), name="withdrawal-request-create"),
+    path("withdrawal-requests/list/", views.WithdrawalRequestListView.as_view(), name="withdrawal-request-list"),
+    path("withdrawal-requests/<int:pk>/", views.WithdrawalRequestDetailView.as_view(), name="withdrawal-request-detail"),
+    path("withdrawal-requests/admin/", views.AdminWithdrawalRequestListView.as_view(), name="admin-withdrawal-request-list"),
+    path("withdrawal-requests/<int:pk>/review/", views.AdminReviewWithdrawalView.as_view(), name="admin-review-withdrawal"),
     path("", include(router.urls)),
 ]

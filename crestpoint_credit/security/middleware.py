@@ -68,7 +68,12 @@ class SecurityHeadersMiddleware:
         )
 
         if not settings.DEBUG:
-            response["Content-Security-Policy"] = "default-src 'self'"
+            # Permissive CSP for API-only backend — no HTML pages are served
+            response["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "connect-src 'self' *; "
+                "frame-ancestors 'none'"
+            )
             response["Strict-Transport-Security"] = (
                 "max-age=31536000; includeSubDomains"
             )
