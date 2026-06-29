@@ -1,0 +1,16 @@
+{
+    "builds": [{
+        "src": "crestpoint_credit/wsgi.py",
+        "use": "@vercel/python",
+        "config": { "maxLambdaSize":"15mb","runtime":"python3.12"}
+    }],
+    "routes": [
+        {
+            "src": "/(.*)",
+            "dest": "crestpoint_credit/wsgi.py"
+        }
+    ]
+
+
+
+}
