@@ -18,6 +18,10 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from .throttling import LoginRateThrottle
 from .serializers import (
     LoginSerializer,
+    OTPVerifySerializer,
+    OTPVerifyRegisterSerializer,
+    OTPEmailRegisterSerializer,
+    OTPEmailSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
 )
@@ -315,3 +319,99 @@ class PasswordResetConfirmView(views.APIView):
             )
         except Exception:
             logger.exception("Failed to invalidate tokens for user: %s", user.email)
+
+
+# ---------------------------------------------------------------------------
+# OTP – Send (Login)
+# ---------------------------------------------------------------------------
+
+
+class OTPEmailView(views.APIView):
+    """
+    Send a 6-digit OTP to the user's email for login verification.
+
+    The email must belong to an existing account.  A rate-limit of 1 request
+    per 60 seconds is enforced via the ``LoginRateThrottle``.
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [LoginRateThrottle]
+
+    def post(self, request, *args, **kwargs):
+        serializer = OTPEmailSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(
+            {"message": "Verification code sent to your email."},
+            status=status.HTTP_200_OK,
+        )
+
+
+# ---------------------------------------------------------------------------
+# OTP – Send (Registration)
+# ---------------------------------------------------------------------------
+
+
+class OTPEmailRegisterView(views.APIView):
+    """
+    Send a 6-digit OTP to the given email for registration verification.
+
+    The email must NOT already be registered.
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [LoginRateThrottle]
+
+    def post(self, request, *args, **kwargs):
+        serializer = OTPEmailRegisterSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(
+            {"message": "Verification code sent to your email."},
+            status=status.HTTP_200_OK,
+        )
+
+
+# ---------------------------------------------------------------------------
+# OTP – Verify (Login)
+# ---------------------------------------------------------------------------
+
+
+class OTPVerifyView(views.APIView):
+    """
+    Verify a 6-digit OTP code for login.
+
+    On success, the response confirms the OTP is valid so the frontend can
+    proceed with the actual login call.
+    """
+
+    permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        serializer = OTPVerifySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(
+            {"message": "Verification successful."},
+            status=status.HTTP_200_OK,
+        )
+
+
+# ---------------------------------------------------------------------------
+# OTP – Verify (Registration)
+# ---------------------------------------------------------------------------
+
+
+class OTPVerifyRegisterView(views.APIView):
+    """
+    Verify a 6-digit OTP code for registration.
+    """
+
+    permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        serializer = OTPVerifyRegisterSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(
+            {"message": "Verification successful."},
+            status=status.HTTP_200_OK,
+        )

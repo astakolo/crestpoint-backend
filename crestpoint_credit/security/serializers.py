@@ -1,11 +1,13 @@
 """Serializers for authentication, token management, and password reset."""
 
 import logging
+import random
 import secrets
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
+from django.core.mail import send_mail
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -273,3 +275,214 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         cache.delete(cache_key)
 
         logger.info("Password reset completed for: %s", email)
+
+
+# ---------------------------------------------------------------------------
+# Email OTP – Send
+# ---------------------------------------------------------------------------
+
+
+class OTPEmailSerializer(serializers.Serializer):
+    """Validate email and generate + send a 6-digit OTP code."""
+
+    email = serializers.EmailField(write_only=True)
+
+    def validate(self, attrs):
+        email = attrs.get("email").strip().lower()
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            raise serializers.ValidationError(
+                {"email": "No account found with this email address."},
+                code="user_not_found",
+            )
+
+        # Generate a 6-digit OTP
+        otp = f"{random.randint(100000, 999999)}"
+
+        # Store in cache with 5-minute TTL
+        cache_key = f"otp_{email}"
+        cache.set(cache_key, otp, timeout=300)  # 5 minutes
+
+        # Track attempts (max 5)
+        attempts_key = f"otp_attempts_{email}"
+        cache.set(attempts_key, 0, timeout=300)
+
+        attrs["user"] = user
+        attrs["otp"] = otp
+        attrs["email"] = email
+        return attrs
+
+    def save(self):
+        """Send the OTP email (synchronous — called from a Celery task or directly)."""
+        email = self.validated_data["email"]
+        otp = self.validated_data["otp"]
+
+        try:
+            send_mail(
+                subject="CrestPoint Credit - Your Verification Code",
+                message=(
+                    f"Your verification code is: {otp}\n\n"
+                    "This code expires in 5 minutes.\n\n"
+                    "If you didn't request this, please ignore this email.\n\n"
+                    "CrestPoint Credit Security Team"
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email],
+                fail_silently=False,
+            )
+            logger.info("OTP sent to: %s", email)
+        except Exception:
+            logger.exception("Failed to send OTP to: %s", email)
+            raise serializers.ValidationError(
+                {"email": "Failed to send verification email. Please try again."},
+                code="email_send_failed",
+            )
+
+
+class OTPEmailRegisterSerializer(serializers.Serializer):
+    """Generate + send a 6-digit OTP to a given email (for signup — user may not exist yet)."""
+
+    email = serializers.EmailField(write_only=True)
+
+    def validate(self, attrs):
+        email = attrs.get("email").strip().lower()
+
+        # For signup, we allow OTP to be sent even if user doesn't exist yet
+        # But check if email is already taken
+        if User.objects.filter(email=email).exists():
+            raise serializers.ValidationError(
+                {"email": "An account with this email already exists."},
+                code="email_taken",
+            )
+
+        otp = f"{random.randint(100000, 999999)}"
+        cache_key = f"otp_register_{email}"
+        cache.set(cache_key, otp, timeout=300)
+
+        attempts_key = f"otp_register_attempts_{email}"
+        cache.set(attempts_key, 0, timeout=300)
+
+        attrs["otp"] = otp
+        attrs["email"] = email
+        return attrs
+
+    def save(self):
+        email = self.validated_data["email"]
+        otp = self.validated_data["otp"]
+        try:
+            send_mail(
+                subject="CrestPoint Credit - Verify Your Email",
+                message=(
+                    f"Your verification code is: {otp}\n\n"
+                    "This code expires in 5 minutes.\n\n"
+                    "If you didn't request this, please ignore this email.\n\n"
+                    "CrestPoint Credit Security Team"
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email],
+                fail_silently=False,
+            )
+            logger.info("Registration OTP sent to: %s", email)
+        except Exception:
+            logger.exception("Failed to send registration OTP to: %s", email)
+            raise serializers.ValidationError(
+                {"email": "Failed to send verification email. Please try again."},
+                code="email_send_failed",
+            )
+
+
+# ---------------------------------------------------------------------------
+# Email OTP – Verify
+# ---------------------------------------------------------------------------
+
+
+class OTPVerifySerializer(serializers.Serializer):
+    """Verify a 6-digit OTP code for login."""
+
+    email = serializers.EmailField(write_only=True)
+    otp = serializers.CharField(write_only=True, min_length=6, max_length=6)
+
+    def validate(self, attrs):
+        email = attrs.get("email").strip().lower()
+        otp = attrs.get("otp").strip()
+
+        cache_key = f"otp_{email}"
+        cached_otp = cache.get(cache_key)
+
+        if not cached_otp:
+            raise serializers.ValidationError(
+                {"otp": "Verification code has expired. Please request a new one."},
+                code="otp_expired",
+            )
+
+        # Check attempt limit
+        attempts_key = f"otp_attempts_{email}"
+        attempts = cache.get(attempts_key, 0)
+        if attempts >= 5:
+            cache.delete(cache_key)
+            cache.delete(attempts_key)
+            raise serializers.ValidationError(
+                {"otp": "Too many failed attempts. Please request a new code."},
+                code="otp_max_attempts",
+            )
+
+        if cached_otp != otp:
+            cache.set(attempts_key, attempts + 1, timeout=300)
+            remaining = 5 - (attempts + 1)
+            raise serializers.ValidationError(
+                {"otp": f"Invalid verification code. {remaining} attempt(s) remaining."},
+                code="otp_invalid",
+            )
+
+        # Valid OTP — consume it
+        cache.delete(cache_key)
+        cache.delete(attempts_key)
+
+        attrs["email"] = email
+        return attrs
+
+
+class OTPVerifyRegisterSerializer(serializers.Serializer):
+    """Verify a 6-digit OTP code for registration."""
+
+    email = serializers.EmailField(write_only=True)
+    otp = serializers.CharField(write_only=True, min_length=6, max_length=6)
+
+    def validate(self, attrs):
+        email = attrs.get("email").strip().lower()
+        otp = attrs.get("otp").strip()
+
+        cache_key = f"otp_register_{email}"
+        cached_otp = cache.get(cache_key)
+
+        if not cached_otp:
+            raise serializers.ValidationError(
+                {"otp": "Verification code has expired. Please request a new one."},
+                code="otp_expired",
+            )
+
+        attempts_key = f"otp_register_attempts_{email}"
+        attempts = cache.get(attempts_key, 0)
+        if attempts >= 5:
+            cache.delete(cache_key)
+            cache.delete(attempts_key)
+            raise serializers.ValidationError(
+                {"otp": "Too many failed attempts. Please request a new code."},
+                code="otp_max_attempts",
+            )
+
+        if cached_otp != otp:
+            cache.set(attempts_key, attempts + 1, timeout=300)
+            remaining = 5 - (attempts + 1)
+            raise serializers.ValidationError(
+                {"otp": f"Invalid verification code. {remaining} attempt(s) remaining."},
+                code="otp_invalid",
+            )
+
+        cache.delete(cache_key)
+        cache.delete(attempts_key)
+
+        attrs["email"] = email
+        return attrs
