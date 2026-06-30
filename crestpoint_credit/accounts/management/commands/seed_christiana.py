@@ -43,8 +43,8 @@ class Command(BaseCommand):
             email=email,
             defaults={
                 "first_name": "Christiana",
-                "last_name": "Black",
-                "phone": "+1 (555) 234-8901",
+                "last_name": "White",
+                "phone": "+1 (555) 234-8431",
                 "is_active": True,
                 "is_verified": True,
                 "role": "customer",
