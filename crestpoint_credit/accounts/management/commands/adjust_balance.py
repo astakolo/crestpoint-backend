@@ -40,7 +40,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--reason",
             type=str,
-            default="System balance adjustment",
+            default="savings",
             help="Description for the adjustment transaction",
         )
         parser.add_argument(
