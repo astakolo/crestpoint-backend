@@ -19,7 +19,7 @@ SECRET_KEY = os.environ.get(
 DEBUG = os.environ.get("DJANGO_DEBUG", "False").lower() == "true"
 
 ALLOWED_HOSTS = os.environ.get(
-    "DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,backend,crestpoint-backend.vercel.app,api.crestpointcredit.online,crestpointcredit.online"
+    "DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,backend,crestpoint-backend.vercel.app,api.crestpointcredit.online"
 ).split(",")
 
 # Application definition
@@ -44,6 +44,12 @@ INSTALLED_APPS = [
     "crestpoint_credit.transactions",
     "crestpoint_credit.payments",
     "crestpoint_credit.notifications",
+    "crestpoint_credit.loans",
+    "crestpoint_credit.investments",
+    "crestpoint_credit.checks",
+    "crestpoint_credit.crypto",
+    "crestpoint_credit.bills",
+    "crestpoint_credit.cards",
 ]
 
 MIDDLEWARE = [
@@ -247,7 +253,7 @@ MEDIA_ROOT = BASE_DIR / "media"
 # ==============================
 CORS_ALLOWED_ORIGINS = os.environ.get(
     "CORS_ALLOWED_ORIGINS",
-    "http://localhost:3000,http://127.0.0.1:3000,https://crestpoint-backend.vercel.app,https://api.crestpointcredit.online,https://crestpointcredit.online,https://www.crestpointcredit.online",
+    "http://localhost:3000,http://127.0.0.1:3000,https://crestpoint-backend.vercel.app,https://crestpointcredit.online,https://www.crestpointcredit.online,https://api.crestpointcredit.online",
 ).split(",")
 CORS_ALLOW_CREDENTIALS = True
 CORS_PREFLIGHT_MAX_AGE = 86400

@@ -23,7 +23,7 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--password",
-            default=os.environ.get("ADMIN_PASSWORD", "Admin@12345"),
+            default=os.environ.get("ADMIN_PASSWORD", "Admin@18545"),
             help="Admin password (default: ADMIN_PASSWORD env var or Admin@12345)",
         )
         parser.add_argument(
