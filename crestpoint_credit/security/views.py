@@ -189,7 +189,16 @@ class TokenRefreshView(views.APIView):
         # When BLACKLIST_AFTER_ROTATION is enabled the old token is
         # automatically blacklisted by ``refresh.access_token``.
         access = refresh.access_token
-        access["role"] = getattr(request.user, "role", None) if hasattr(request, "user") and request.user.is_authenticated else None
+
+        # Inject role into the new access token.
+        # request.user is NOT authenticated here (AllowAny), so look up
+        # the user from the JWT payload instead.
+        try:
+            from crestpoint_credit.accounts.models import User
+            user_obj = User.objects.get(id=refresh.payload.get("user_id"))
+            access["role"] = user_obj.role
+        except Exception:
+            pass
 
         response_data = {
             "access": str(access),
@@ -197,15 +206,9 @@ class TokenRefreshView(views.APIView):
         }
 
         response = Response(response_data, status=status.HTTP_200_OK)
-        response.set_cookie(
-            key="access_token",
-            value=str(access),
-            httponly=True,
-            secure=not settings.DEBUG,
-            samesite="Lax",
-            path="/",
-            max_age=900,
-        )
+        # MUST set BOTH cookies — ROTATE_REFRESH_TOKENS blacklists the old
+        # refresh token, so the new one must be stored in the cookie.
+        _set_auth_cookies(response, str(access), str(refresh))
         return response
 
 

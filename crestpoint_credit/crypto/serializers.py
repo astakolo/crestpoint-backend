@@ -126,3 +126,27 @@ class AdminProcessCryptoDepositSerializer(serializers.Serializer):
                 {"rejection_reason": "A rejection reason is required when rejecting a deposit."}
             )
         return attrs
+
+
+class CryptoWithdrawalCreateSerializer(serializers.Serializer):
+    """Validates input for creating a crypto withdrawal."""
+
+    crypto_currency = serializers.ChoiceField(
+        choices=["BTC", "ETH", "USDT"],
+        help_text="The cryptocurrency to withdraw.",
+    )
+    amount = serializers.DecimalField(max_digits=18, decimal_places=8)
+    destination_address = serializers.CharField(
+        max_length=100,
+        help_text="The destination wallet address.",
+    )
+
+    def validate_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Amount must be greater than zero.")
+        return value
+
+    def validate_destination_address(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("Destination address is required.")
+        return value.strip()

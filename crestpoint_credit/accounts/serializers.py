@@ -106,6 +106,7 @@ class UserSerializer(serializers.ModelSerializer):
     """Standard serializer for the authenticated user's own profile."""
 
     created_at = serializers.DateTimeField(read_only=True)
+    kyc_status = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = User
@@ -118,9 +119,15 @@ class UserSerializer(serializers.ModelSerializer):
             "role",
             "is_active",
             "is_verified",
+            "kyc_status",
             "created_at",
         ]
-        read_only_fields = ["id", "role", "is_active", "is_verified", "created_at"]
+        read_only_fields = ["id", "role", "is_active", "is_verified", "kyc_status", "created_at"]
+
+    def get_kyc_status(self, obj):
+        if hasattr(obj, "kyc_document"):
+            return obj.kyc_document.status
+        return "not_submitted"
 
 
 class UserAdminSerializer(serializers.ModelSerializer):

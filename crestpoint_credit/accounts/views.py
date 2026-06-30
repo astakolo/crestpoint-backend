@@ -98,7 +98,11 @@ class UserDetailView(RetrieveUpdateAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self):
-        return self.request.user
+        user = self.request.user
+        if not hasattr(user, '_kyc_prefetched'):
+            user = User.objects.select_related('kyc_document').get(pk=user.pk)
+            user._kyc_prefetched = True
+        return user
 
     def get_serializer_class(self):
         if self.request.method in ("PUT", "PATCH"):

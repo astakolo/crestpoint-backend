@@ -20,6 +20,7 @@ from .models import (
 from .serializers import (
     CryptoWalletSerializer,
     CryptoDepositCreateSerializer,
+    CryptoWithdrawalCreateSerializer,
     CryptoTransactionSerializer,
     CryptoTransactionAdminSerializer,
     AdminProcessCryptoDepositSerializer,
@@ -140,6 +141,85 @@ class CryptoTransactionListView(generics.ListAPIView):
             qs = qs.filter(status=txn_status)
 
         return qs
+
+
+@method_decorator(never_cache, name="dispatch")
+class CryptoWithdrawalCreateView(APIView):
+    """
+    POST /crypto/withdraw/
+    Initiate a crypto withdrawal from the user's bank account.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = CryptoWithdrawalCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        data = serializer.validated_data
+        crypto_currency = data["crypto_currency"]
+        amount = data["amount"]
+        destination_address = data["destination_address"]
+        exchange_rate = MOCK_EXCHANGE_RATES.get(crypto_currency, Decimal("1.00"))
+        usd_amount = (amount * exchange_rate).quantize(Decimal("0.01"))
+
+        # Debit the first active, unfrozen bank account
+        bank_account = BankAccount.objects.filter(
+            user=request.user,
+            is_active=True,
+            is_frozen=False,
+        ).first()
+
+        if not bank_account:
+            return Response(
+                {"detail": "No active bank account found."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if bank_account.balance < usd_amount:
+            return Response(
+                {"detail": f"Insufficient balance. You need at least ${usd_amount} USD."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        bank_account.balance -= usd_amount
+        bank_account.save(update_fields=["balance", "updated_at"])
+
+        wallet, _ = CryptoWallet.objects.get_or_create(
+            user=request.user,
+            defaults={
+                "wallet_address": generate_wallet_address(),
+                "currency": "BTC",
+                "balance": Decimal("0"),
+            },
+        )
+
+        txn = CryptoTransaction.objects.create(
+            wallet=wallet,
+            transaction_type="withdrawal",
+            crypto_currency=crypto_currency,
+            amount=amount,
+            usd_amount=usd_amount,
+            exchange_rate=exchange_rate,
+            status=CryptoTransactionStatus.PENDING,
+            wallet_address=destination_address,
+            metadata={"destination_address": destination_address},
+        )
+
+        logger.info(
+            "Crypto withdrawal %s submitted by user %s: %s %s (%s USD) to %s",
+            txn.reference,
+            request.user.email,
+            amount,
+            crypto_currency,
+            usd_amount,
+            destination_address,
+        )
+
+        return Response(
+            CryptoTransactionSerializer(txn).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 # ---------------------------------------------------------------------------
