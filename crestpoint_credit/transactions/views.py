@@ -300,35 +300,52 @@ class AdminTransactionViewSet(ReadOnlyModelViewSet):
 
     def get_queryset(self):
         qs = Transaction.objects.select_related("account", "recipient_account")
+        params = self.request.query_params
 
         # Filter params
-        user_id = self.request.query_params.get("user")
+        user_id = params.get("user")
         if user_id:
             qs = qs.filter(account__user_id=user_id)
 
-        account_id = self.request.query_params.get("account")
+        account_id = params.get("account")
         if account_id:
             qs = qs.filter(account_id=account_id)
 
-        txn_type = self.request.query_params.get("type")
+        txn_type = params.get("type")
         if txn_type:
             qs = qs.filter(transaction_type=txn_type)
 
-        txn_status = self.request.query_params.get("status")
+        txn_status = params.get("status")
         if txn_status:
             qs = qs.filter(status=txn_status)
 
-        flagged = self.request.query_params.get("flagged")
-        if flagged is not None:
-            qs = qs.filter(is_flagged=flagged.lower() in ("true", "1", "yes"))
+        # Support both "flagged" and "is_flagged" param names
+        flagged = params.get("flagged") or params.get("is_flagged")
+        if flagged is not None and str(flagged).strip():
+            qs = qs.filter(is_flagged=str(flagged).lower() in ("true", "1", "yes"))
 
-        from_date = self.request.query_params.get("from_date")
+        # Support both "from_date"/"date_from" and "to_date"/"date_to"
+        from_date = params.get("from_date") or params.get("date_from")
         if from_date:
             qs = qs.filter(created_at__date__gte=from_date)
 
-        to_date = self.request.query_params.get("to_date")
+        to_date = params.get("to_date") or params.get("date_to")
         if to_date:
             qs = qs.filter(created_at__date__lte=to_date)
+
+        # Amount range filters
+        min_amount = params.get("min_amount") or params.get("amount_min")
+        if min_amount:
+            qs = qs.filter(amount__gte=min_amount)
+
+        max_amount = params.get("max_amount") or params.get("amount_max")
+        if max_amount:
+            qs = qs.filter(amount__lte=max_amount)
+
+        # Exact reference filter
+        reference = params.get("reference")
+        if reference:
+            qs = qs.filter(reference__iexact=reference)
 
         return qs
 
@@ -500,29 +517,43 @@ class AdminCSVExportView(APIView):
         from django.http import HttpResponse
 
         qs = Transaction.objects.select_related("account", "account__user", "recipient_account")
+        params = request.query_params
 
         # Apply same filters as AdminTransactionViewSet
-        user_id = request.query_params.get("user")
+        user_id = params.get("user")
         if user_id:
             qs = qs.filter(account__user_id=user_id)
-        account_id = request.query_params.get("account")
+        account_id = params.get("account")
         if account_id:
             qs = qs.filter(account_id=account_id)
-        txn_type = request.query_params.get("type")
+        txn_type = params.get("type")
         if txn_type:
             qs = qs.filter(transaction_type=txn_type)
-        txn_status = request.query_params.get("status")
+        txn_status = params.get("status")
         if txn_status:
             qs = qs.filter(status=txn_status)
-        flagged = request.query_params.get("flagged")
-        if flagged is not None:
-            qs = qs.filter(is_flagged=flagged.lower() in ("true", "1", "yes"))
-        from_date = request.query_params.get("from_date")
+        # Support both "flagged" and "is_flagged" param names
+        flagged = params.get("flagged") or params.get("is_flagged")
+        if flagged is not None and str(flagged).strip():
+            qs = qs.filter(is_flagged=str(flagged).lower() in ("true", "1", "yes"))
+        # Support both "from_date"/"date_from" and "to_date"/"date_to"
+        from_date = params.get("from_date") or params.get("date_from")
         if from_date:
             qs = qs.filter(created_at__date__gte=from_date)
-        to_date = request.query_params.get("to_date")
+        to_date = params.get("to_date") or params.get("date_to")
         if to_date:
             qs = qs.filter(created_at__date__lte=to_date)
+        # Amount range filters
+        min_amount = params.get("min_amount") or params.get("amount_min")
+        if min_amount:
+            qs = qs.filter(amount__gte=min_amount)
+        max_amount = params.get("max_amount") or params.get("amount_max")
+        if max_amount:
+            qs = qs.filter(amount__lte=max_amount)
+        # Exact reference filter
+        reference = params.get("reference")
+        if reference:
+            qs = qs.filter(reference__iexact=reference)
 
         # Limit export to 10000 rows
         qs = qs.order_by("-created_at")[:10000]
