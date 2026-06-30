@@ -1,0 +1,39 @@
+{% extends "emails/base_email.html" %}
+{% block content %}
+<h1>{{ title }}</h1>
+<p class="greeting">Hello{{ ", " + user_name if user_name else "," }},</p>
+<p>{{ message }}</p>
+
+{% if details %}
+<div class="detail-card">
+  {% for key, value in details.items %}
+  <div class="detail-row">
+    <span class="label">{{ key }}</span>
+    <span class="value">{{ value }}</span>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if cta_url and cta_text %}
+<div style="text-align: center;">
+  <a href="{{ cta_url }}" class="cta-button">{{ cta_text }}</a>
+</div>
+{% endif %}
+
+{% if is_success %}
+<div class="success-box">
+  <p>{{ success_message|default:"This action was completed successfully." }}</p>
+</div>
+{% endif %}
+
+{% if warning_text %}
+<div class="warning-box">
+  <p>{{ warning_text }}</p>
+</div>
+{% endif %}
+
+<hr class="divider">
+
+<p>Questions? Contact our support team at <a href="mailto:support@crestpointcredit.com" style="color: #1a56db;">support@crestpointcredit.com</a></p>
+{% endblock %}

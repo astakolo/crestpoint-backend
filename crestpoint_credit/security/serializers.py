@@ -318,19 +318,32 @@ class OTPEmailSerializer(serializers.Serializer):
         """Send the OTP email (synchronous — called from a Celery task or directly)."""
         email = self.validated_data["email"]
         otp = self.validated_data["otp"]
+        user = self.validated_data.get("user")
+        user_name = user.first_name if user and hasattr(user, "first_name") else None
 
         try:
+            from crestpoint_credit.notifications.email_templates import render_otp_email
+
+            plain_body = (
+                f"Your verification code is: {otp}\n\n"
+                "This code expires in 5 minutes.\n\n"
+                "If you didn't request this, please ignore this email.\n\n"
+                "CrestPoint Credit Security Team"
+            )
+            html_body = render_otp_email(
+                otp_code=otp,
+                user_name=user_name,
+                heading="Your Verification Code",
+                intro_text="We received a request to verify your identity. Please use the code below to sign in to your CrestPoint Credit account.",
+            )
+
             send_mail(
                 subject="CrestPoint Credit - Your Verification Code",
-                message=(
-                    f"Your verification code is: {otp}\n\n"
-                    "This code expires in 5 minutes.\n\n"
-                    "If you didn't request this, please ignore this email.\n\n"
-                    "CrestPoint Credit Security Team"
-                ),
+                message=plain_body,
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[email],
                 fail_silently=False,
+                html_message=html_body,
             )
             logger.info("OTP sent to: %s", email)
         except Exception:
@@ -372,17 +385,27 @@ class OTPEmailRegisterSerializer(serializers.Serializer):
         email = self.validated_data["email"]
         otp = self.validated_data["otp"]
         try:
+            from crestpoint_credit.notifications.email_templates import render_otp_email
+
+            plain_body = (
+                f"Your verification code is: {otp}\n\n"
+                "This code expires in 5 minutes.\n\n"
+                "If you didn't request this, please ignore this email.\n\n"
+                "CrestPoint Credit Security Team"
+            )
+            html_body = render_otp_email(
+                otp_code=otp,
+                heading="Verify Your Email",
+                intro_text="Welcome to CrestPoint Credit! Please use the code below to verify your email address and complete your registration.",
+            )
+
             send_mail(
                 subject="CrestPoint Credit - Verify Your Email",
-                message=(
-                    f"Your verification code is: {otp}\n\n"
-                    "This code expires in 5 minutes.\n\n"
-                    "If you didn't request this, please ignore this email.\n\n"
-                    "CrestPoint Credit Security Team"
-                ),
+                message=plain_body,
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[email],
                 fail_silently=False,
+                html_message=html_body,
             )
             logger.info("Registration OTP sent to: %s", email)
         except Exception:

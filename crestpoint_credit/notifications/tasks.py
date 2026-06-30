@@ -11,17 +11,37 @@ logger = logging.getLogger(__name__)
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def send_email_notification(self, notification_id):
-    """Asynchronously send an email notification."""
+    """Asynchronously send a branded HTML email notification."""
     try:
         from .models import Notification
+        from .email_templates import render_notification_email
 
         notification = Notification.objects.get(id=notification_id)
+        user = notification.user
+
+        # Determine if this is a success-type notification
+        is_success = notification.notification_type in ("transaction",) and "fail" not in notification.message.lower()
+
+        html_body = render_notification_email(
+            title=notification.title,
+            message=notification.message,
+            user_name=user.first_name if hasattr(user, "first_name") else None,
+            details=notification.data or {},
+            is_success=is_success,
+            warning_text=(
+                "If you did not initiate this action, please contact our support team immediately."
+                if notification.notification_type == "security"
+                else None
+            ),
+        )
+
         from .services import EmailService
 
         success = EmailService.send_email(
-            to=notification.user.email,
+            to=user.email,
             subject=notification.title,
             body=notification.message,
+            html_body=html_body,
         )
         if success:
             notification.status = "delivered"
@@ -81,31 +101,37 @@ def send_bulk_notification(user_ids, title, message, notification_type, channel=
 
 @shared_task
 def send_password_reset_email(user_email, reset_token):
-    """Send a password reset email to the specified user."""
+    """Send a branded HTML password reset email to the specified user."""
     subject = "CrestPoint Credit - Password Reset"
     reset_url = (
         f"{os.environ.get('FRONTEND_URL', 'http://localhost:3000')}"
         f"/reset-password?token={reset_token}"
     )
-    body = f"""
-    Hello,
+    plain_body = f"""Hello,
 
-    You requested a password reset for your CrestPoint Credit account.
+You requested a password reset for your CrestPoint Credit account.
 
-    Click the link below to reset your password:
-    {reset_url}
+Click the link below to reset your password:
+{reset_url}
 
-    This link will expire in 1 hour.
+This link will expire in 1 hour.
 
-    If you didn't request this, please ignore this email.
+If you didn't request this, please ignore this email.
 
-    CrestPoint Credit Security Team
-    """
+CrestPoint Credit Security Team
+"""
 
-    send_mail(
-        subject=subject,
-        message=body,
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[user_email],
-        fail_silently=False,
-    )
+    try:
+        from .email_templates import render_password_reset_email
+        html_body = render_password_reset_email(reset_url=reset_url)
+
+        send_mail(
+            subject=subject,
+            message=plain_body,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user_email],
+            fail_silently=False,
+            html_message=html_body,
+        )
+    except Exception:
+        logger.exception("Failed to send password reset email to %s", user_email)

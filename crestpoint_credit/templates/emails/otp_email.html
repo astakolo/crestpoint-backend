@@ -1,0 +1,21 @@
+{% extends "emails/base_email.html" %}
+{% block content %}
+<h1>{{ heading|default:"Verify Your Identity" }}</h1>
+<p class="greeting">Hello{{ ", " + user_name if user_name else "," }},</p>
+<p>{{ intro_text|default:"We received a request to verify your email address. Please use the code below to continue." }}</p>
+
+<div class="otp-box">
+  <p class="otp-label">{{ code_label|default:"Verification Code" }}</p>
+  <p class="otp-code">{{ otp_code }}</p>
+</div>
+
+<p>{{ after_code_text|default:"Enter this code in the app to complete your verification. This code expires in 5 minutes." }}</p>
+
+<div class="warning-box">
+  <p><strong>Security Notice:</strong> If you did not request this verification code, please ignore this email. Your account remains secure.</p>
+</div>
+
+<hr class="divider">
+
+<p>Need help? Contact our support team at <a href="mailto:support@crestpointcredit.com" style="color: #1a56db;">support@crestpointcredit.com</a></p>
+{% endblock %}
