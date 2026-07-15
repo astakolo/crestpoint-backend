@@ -1,0 +1,972 @@
+     1→     1→import React, { useState, useEffect } from 'react';
+     2→     2→import { Link } from 'react-router-dom';
+     3→     3→
+     4→     4→/* ───────── Animated counter hook ───────── */
+     5→     5→function useCounter(end, duration = 2000) {
+     6→     6→  const [count, setCount] = useState(0);
+     7→     7→  useEffect(() => {
+     8→     8→    let start = 0;
+     9→     9→    const step = end / (duration / 16);
+    10→    10→    const timer = setInterval(() => {
+    11→    11→      start += step;
+    12→    12→      if (start >= end) { setCount(end); clearInterval(timer); }
+    13→    13→      else setCount(Math.floor(start));
+    14→    14→    }, 16);
+    15→    15→    return () => clearInterval(timer);
+    16→    16→  }, [end, duration]);
+    17→    17→  return count;
+    18→    18→}
+    19→    19→
+    20→    20→/* ───────── SVG Icons (inline) ───────── */
+    21→    21→const IconShield = () => (
+    22→    22→  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    23→    23→    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
+    24→    24→    <path d="M9 12l2 2 4-4" />
+    25→    25→  </svg>
+    26→    26→);
+    27→    27→
+    28→    28→const IconBolt = () => (
+    29→    29→  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    30→    30→    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    31→    31→  </svg>
+    32→    32→);
+    33→    33→
+    34→    34→const IconSmartphone = () => (
+    35→    35→  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    36→    36→    <rect width="14" height="20" x="5" y="2" rx="2" ry="2" />
+    37→    37→    <line x1="12" y1="18" x2="12.01" y2="18" />
+    38→    38→  </svg>
+    39→    39→);
+    40→    40→
+    41→    41→const IconClock = () => (
+    42→    42→  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    43→    43→    <circle cx="12" cy="12" r="10" />
+    44→    44→    <polyline points="12 6 12 12 16 14" />
+    45→    45→  </svg>
+    46→    46→);
+    47→    47→
+    48→    48→const IconChart = () => (
+    49→    49→  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    50→    50→    <line x1="18" y1="20" x2="18" y2="10" />
+    51→    51→    <line x1="12" y1="20" x2="12" y2="4" />
+    52→    52→    <line x1="6" y1="20" x2="6" y2="14" />
+    53→    53→  </svg>
+    54→    54→);
+    55→    55→
+    56→    56→const IconUsers = () => (
+    57→    57→  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    58→    58→    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+    59→    59→    <circle cx="9" cy="7" r="4" />
+    60→    60→    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+    61→    61→    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    62→    62→  </svg>
+    63→    63→);
+    64→    64→
+    65→    65→const IconCheck = () => (
+    66→    66→  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    67→    67→    <polyline points="20 6 9 17 4 12" />
+    68→    68→  </svg>
+    69→    69→);
+    70→    70→
+    71→    71→const IconArrowRight = () => (
+    72→    72→  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    73→    73→    <line x1="5" y1="12" x2="19" y2="12" />
+    74→    74→    <polyline points="12 5 19 12 12 19" />
+    75→    75→  </svg>
+    76→    76→);
+    77→    77→
+    78→    78→/* ───────── Feature Card ───────── */
+    79→    79→function FeatureCard({ icon, title, description, image, reverse }) {
+    80→    80→  return (
+    81→    81→    <div style={{
+    82→    82→      display: 'flex',
+    83→    83→      alignItems: 'center',
+    84→    84→      gap: '64px',
+    85→    85→      padding: '40px 0',
+    86→    86→    }}
+    87→    87→    className="lp-feature-row"
+    88→    88→    >
+    89→    89→      <div style={{
+    90→    90→        flex: '1 1 45%',
+    91→    91→        display: 'flex',
+    92→    92→        flexDirection: 'column',
+    93→    93→        gap: '16px',
+    94→    94→      }}>
+    95→    95→        <div style={{
+    96→    96→          display: 'inline-flex',
+    97→    97→          alignItems: 'center',
+    98→    98→          justifyContent: 'center',
+    99→    99→          width: '56px',
+   100→   100→          height: '56px',
+   101→   101→          borderRadius: '14px',
+   102→   102→          backgroundColor: '#eff6ff',
+   103→   103→          color: '#1a56db',
+   104→   104→        }}>
+   105→   105→          {icon}
+   106→   106→        </div>
+   107→   107→        <h3 style={{
+   108→   108→          fontSize: '26px',
+   109→   109→          fontWeight: 700,
+   110→   110→          color: '#0f172a',
+   111→   111→          margin: 0,
+   112→   112→          lineHeight: 1.3,
+   113→   113→        }}>{title}</h3>
+   114→   114→        <p style={{
+   115→   115→          fontSize: '16px',
+   116→   116→          lineHeight: 1.7,
+   117→   117→          color: '#64748b',
+   118→   118→          margin: 0,
+   119→   119→        }}>{description}</p>
+   120→   120→      </div>
+   121→   121→      <div style={{ flex: '1 1 45%' }}>
+   122→   122→        <img
+   123→   123→          src={image}
+   124→   124→          alt={title}
+   125→   125→          style={{
+   126→   126→            width: '100%',
+   127→   127→            borderRadius: '16px',
+   128→   128→            boxShadow: '0 20px 60px rgba(26, 86, 219, 0.12)',
+   129→   129→          }}
+   130→   130→          loading="lazy"
+   131→   131→        />
+   132→   132→      </div>
+   133→   133→      <style>{`
+   134→   134→        @media (max-width: 900px) {
+   135→   135→          .lp-feature-row {
+   136→   136→            flex-direction: ${reverse ? 'column-reverse' : 'column'} !important;
+   137→   137→            gap: 32px !important;
+   138→   138→          }
+   139→   139→          .lp-feature-row > div {
+   140→   140→            flex: none !important;
+   141→   141→            width: 100% !important;
+   142→   142→          }
+   143→   143→        }
+   144→   144→      `}</style>
+   145→   145→    </div>
+   146→   146→  );
+   147→   147→}
+   148→   148→
+   149→   149→/* ───────── Stat Counter ───────── */
+   150→   150→function StatCounter({ value, suffix, label }) {
+   151→   151→  const count = useCounter(value);
+   152→   152→  return (
+   153→   153→    <div style={{ textAlign: 'center' }}>
+   154→   154→      <div style={{
+   155→   155→        fontSize: '40px',
+   156→   156→        fontWeight: 800,
+   157→   157→        color: '#ffffff',
+   158→   158→        lineHeight: 1.1,
+   159→   159→        fontFamily: 'Inter, sans-serif',
+   160→   160→      }}>
+   161→   161→        {count.toLocaleString()}{suffix}
+   162→   162→      </div>
+   163→   163→      <div style={{
+   164→   164→        fontSize: '14px',
+   165→   165→        color: 'rgba(255,255,255,0.7)',
+   166→   166→        marginTop: '8px',
+   167→   167→        fontWeight: 500,
+   168→   168→      }}>{label}</div>
+   169→   169→    </div>
+   170→   170→  );
+   171→   171→}
+   172→   172→
+   173→   173→/* ───────── Testimonial Card ───────── */
+   174→   174→function TestimonialCard({ quote, name, role, avatar }) {
+   175→   175→  return (
+   176→   176→    <div style={{
+   177→   177→      backgroundColor: '#ffffff',
+   178→   178→      borderRadius: '16px',
+   179→   179→      padding: '32px',
+   180→   180→      boxShadow: '0 4px 24px rgba(0,0,0,0.06)',
+   181→   181→      border: '1px solid #f1f5f9',
+   182→   182→      display: 'flex',
+   183→   183→      flexDirection: 'column',
+   184→   184→      gap: '20px',
+   185→   185→    }}>
+   186→   186→      <div style={{ fontSize: '32px', color: '#1a56db', lineHeight: 1 }}>&ldquo;</div>
+   187→   187→      <p style={{
+   188→   188→        fontSize: '15px',
+   189→   189→        lineHeight: 1.7,
+   190→   190→        color: '#334155',
+   191→   191→        margin: 0,
+   192→   192→        flex: 1,
+   193→   193→      }}>{quote}</p>
+   194→   194→      <div style={{
+   195→   195→        display: 'flex',
+   196→   196→        alignItems: 'center',
+   197→   197→        gap: '12px',
+   198→   198→        borderTop: '1px solid #f1f5f9',
+   199→   199→        paddingTop: '20px',
+   200→   200→      }}>
+   201→   201→        <div style={{
+   202→   202→          width: '44px',
+   203→   203→          height: '44px',
+   204→   204→          borderRadius: '50%',
+   205→   205→          backgroundColor: '#1a56db',
+   206→   206→          color: '#fff',
+   207→   207→          display: 'flex',
+   208→   208→          alignItems: 'center',
+   209→   209→          justifyContent: 'center',
+   210→   210→          fontSize: '16px',
+   211→   211→          fontWeight: 700,
+   212→   212→          flexShrink: 0,
+   213→   213→        }}>{avatar}</div>
+   214→   214→        <div>
+   215→   215→          <div style={{ fontSize: '14px', fontWeight: 600, color: '#0f172a' }}>{name}</div>
+   216→   216→          <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '2px' }}>{role}</div>
+   217→   217→        </div>
+   218→   218→      </div>
+   219→   219→    </div>
+   220→   220→  );
+   221→   221→}
+   222→   222→
+   223→   223→/* ═══════════════════════════════════
+   224→   224→   LANDING PAGE
+   225→   225→   ═══════════════════════════════════ */
+   226→   226→export default function LandingPage() {
+   227→   227→  const [scrolled, setScrolled] = useState(false);
+   228→   228→
+   229→   229→  useEffect(() => {
+   230→   230→    const onScroll = () => setScrolled(window.scrollY > 40);
+   231→   231→    window.addEventListener('scroll', onScroll, { passive: true });
+   232→   232→    return () => window.removeEventListener('scroll', onScroll);
+   233→   233→  }, []);
+   234→   234→
+   235→   235→  return (
+   236→   236→    <div style={S.page}>
+   237→   237→
+   238→   238→      {/* ─── NAVBAR ─── */}
+   239→   239→      <nav style={{
+   240→   240→        ...S.nav,
+   241→   241→        boxShadow: scrolled ? '0 1px 12px rgba(0,0,0,0.08)' : 'none',
+   242→   242→        backgroundColor: scrolled ? 'rgba(255,255,255,0.97)' : 'transparent',
+   243→   243→        backdropFilter: scrolled ? 'blur(12px)' : 'none',
+   244→   244→      }}>
+   245→   245→        <div style={S.navInner}>
+   246→   246→          <a href="/" style={S.logo}>
+   247→   247→            <span style={{
+   248→   248→              display: 'inline-flex',
+   249→   249→              alignItems: 'center',
+   250→   250→              justifyContent: 'center',
+   251→   251→              width: '36px',
+   252→   252→              height: '36px',
+   253→   253→              borderRadius: '10px',
+   254→   254→              background: 'linear-gradient(135deg, #1a56db, #3b82f6)',
+   255→   255→              color: '#fff',
+   256→   256→              fontSize: '16px',
+   257→   257→              fontWeight: 800,
+   258→   258→              marginRight: '10px',
+   259→   259→            }}>C</span>
+   260→   260→            CrestPoint Credit
+   261→   261→          </a>
+   262→   262→          <div style={S.navLinks} className="lp-nav-links">
+   263→   263→            {['Features', 'Security', 'About'].map(item => (
+   264→   264→              <a
+   265→   265→                key={item}
+   266→   266→                href={`#${item.toLowerCase()}`}
+   267→   267→                style={S.navLink}
+   268→   268→                onMouseEnter={e => e.currentTarget.style.color = '#1a56db'}
+   269→   269→                onMouseLeave={e => e.currentTarget.style.color = '#334155'}
+   270→   270→              >{item}</a>
+   271→   271→            ))}
+   272→   272→          </div>
+   273→   273→          <div style={S.navCta} className="lp-nav-cta">
+   274→   274→            <Link to="/login" style={S.btnGhost}>Log In</Link>
+   275→   275→            <Link to="/register" style={S.btnPrimary}>Open Account</Link>
+   276→   276→          </div>
+   277→   277→        </div>
+   278→   278→      </nav>
+   279→   279→
+   280→   280→      {/* ─── HERO ─── */}
+   281→   281→      <section style={S.hero}>
+   282→   282→        <div style={S.heroInner}>
+   283→   283→          <div style={S.heroContent}>
+   284→   284→            <div style={S.heroBadge}>Trusted by 50,000+ customers worldwide</div>
+   285→   285→            <h1 style={S.heroTitle}>
+   286→   286→              Banking that moves <br />
+   287→   287→              <span style={{ color: '#1a56db' }}>at the speed of life</span>
+   288→   288→            </h1>
+   289→   289→            <p style={S.heroSub}>
+   290→   290→              CrestPoint Credit delivers a next-generation digital banking experience.
+   291→   291→              Send money instantly, track spending in real time, and grow your wealth
+   292→   292→              — all from one powerful platform built for the modern economy.
+   293→   293→            </p>
+   294→   294→            <div style={S.heroActions}>
+   295→   295→              <Link to="/register" style={{
+   296→   296→                ...S.btnPrimary,
+   297→   297→                padding: '14px 32px',
+   298→   298→                fontSize: '16px',
+   299→   299→                borderRadius: '12px',
+   300→   300→                display: 'inline-flex',
+   301→   301→                alignItems: 'center',
+   302→   302→                gap: '8px',
+   303→   303→              }}>
+   304→   304→                Get Started Free <IconArrowRight />
+   305→   305→              </Link>
+   306→   306→              <a href="#features" style={{
+   307→   307→                ...S.btnGhost,
+   308→   308→                padding: '14px 28px',
+   309→   309→                fontSize: '16px',
+   310→   310→                borderRadius: '12px',
+   311→   311→              }}>
+   312→   312→                Learn More
+   313→   313→              </a>
+   314→   314→            </div>
+   315→   315→            <div style={S.heroTrust}>
+   316→   316→              {['256-bit Encryption', 'FDIC Insured', '24/7 Support'].map(item => (
+   317→   317→                <div key={item} style={S.trustItem}>
+   318→   318→                  <span style={{ color: '#059669' }}><IconCheck /></span>
+   319→   319→                  <span>{item}</span>
+   320→   320→                </div>
+   321→   321→              ))}
+   322→   322→            </div>
+   323→   323→          </div>
+   324→   324→          <div style={S.heroImageWrap} className="lp-hero-img">
+   325→   325→            <img
+   326→   326→              src="/images/hero.png"
+   327→   327→              alt="CrestPoint Credit digital banking dashboard"
+   328→   328→              style={S.heroImage}
+   329→   329→            />
+   330→   330→          </div>
+   331→   331→        </div>
+   332→   332→      </section>
+   333→   333→
+   334→   334→      {/* ─── STATS BAR ─── */}
+   335→   335→      <section style={S.statsBar}>
+   336→   336→        <StatCounter value={50000} suffix="+" label="Active Customers" />
+   337→   337→        <div style={{ width: '1px', height: '48px', backgroundColor: 'rgba(255,255,255,0.15)' }} />
+   338→   338→        <StatCounter value={2} suffix="B+" label="Transactions Processed" />
+   339→   339→        <div style={{ width: '1px', height: '48px', backgroundColor: 'rgba(255,255,255,0.15)' }} />
+   340→   340→        <StatCounter value={99} suffix=".9%" label="Uptime Guarantee" />
+   341→   341→        <div style={{ width: '1px', height: '48px', backgroundColor: 'rgba(255,255,255,0.15)' }} />
+   342→   342→        <StatCounter value={150} suffix="+" label="Countries Served" />
+   343→   343→      </section>
+   344→   344→
+   345→   345→      {/* ─── FEATURES ─── */}
+   346→   346→      <section id="features" style={S.section}>
+   347→   347→        <div style={S.sectionInner}>
+   348→   348→          <div style={{ textAlign: 'center', maxWidth: '600px', margin: '0 auto 64px' }}>
+   349→   349→            <div style={S.sectionBadge}>Features</div>
+   350→   350→            <h2 style={S.sectionTitle}>Everything you need to manage your money</h2>
+   351→   351→            <p style={S.sectionSub}>
+   352→   352→              From instant transfers to smart insights, CrestPoint Credit gives you
+   353→   353→              complete control over your finances with tools designed for how people
+   354→   354→              actually bank today.
+   355→   355→            </p>
+   356→   356→          </div>
+   357→   357→
+   358→   358→          <FeatureCard
+   359→   359→            icon={<IconBolt />}
+   360→   360→            title="Instant Transfers"
+   361→   361→            description="Send money to anyone, anywhere, in seconds. Whether it's a one-time payment or a recurring transfer, CrestPoint processes your transactions in real time with zero hidden fees and full transparency on every step of the journey. Support for domestic wires, international remittances, and peer-to-peer payments — all from a single dashboard."
+   362→   362→            image="/images/transfers.png"
+   363→   363→          />
+   364→   364→
+   365→   365→          <div style={{ height: '1px', backgroundColor: '#e2e8f0', margin: '8px 0' }} />
+   366→   366→
+   367→   367→          <FeatureCard
+   368→   368→            icon={<IconSmartphone />}
+   369→   369→            title="Mobile-First Banking"
+   370→   370→            description="Your entire financial life fits in your pocket. CrestPoint's responsive interface adapts seamlessly to any device — phone, tablet, or desktop. Check balances, deposit checks with your camera, approve transactions with biometric authentication, and receive instant push notifications for every activity on your account."
+   371→   371→            image="/images/mobile.png"
+   372→   372→            reverse
+   373→   373→          />
+   374→   374→
+   375→   375→          <div style={{ height: '1px', backgroundColor: '#e2e8f0', margin: '8px 0' }} />
+   376→   376→
+   377→   377→          <FeatureCard
+   378→   378→            icon={<IconChart />}
+   379→   379→            title="Smart Financial Insights"
+   380→   380→            description="Go beyond simple balance tracking. CrestPoint automatically categorizes your spending, highlights trends, and delivers weekly financial health reports. Set savings goals, get alerts when you're approaching budget limits, and make data-driven decisions about your money with interactive charts and exportable statements."
+   381→   381→            image="/images/hero.png"
+   382→   382→          />
+   383→   383→        </div>
+   384→   384→      </section>
+   385→   385→
+   386→   386→      {/* ─── SECURITY ─── */}
+   387→   387→      <section id="security" style={{ ...S.section, backgroundColor: '#f8fafc' }}>
+   388→   388→        <div style={{ ...S.sectionInner, display: 'flex', alignItems: 'center', gap: '80px' }} className="lp-security-row">
+   389→   389→          <div style={{ flex: '1 1 45%' }}>
+   390→   390→            <img
+   391→   391→              src="/images/security.png"
+   392→   392→              alt="CrestPoint Credit security"
+   393→   393→              style={{
+   394→   394→                width: '100%',
+   395→   395→                borderRadius: '20px',
+   396→   396→                boxShadow: '0 24px 64px rgba(26, 86, 219, 0.10)',
+   397→   397→              }}
+   398→   398→              loading="lazy"
+   399→   399→            />
+   400→   400→          </div>
+   401→   401→          <div style={{ flex: '1 1 50%', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+   402→   402→            <div style={S.sectionBadge}>Security</div>
+   403→   403→            <h2 style={{ ...S.sectionTitle, textAlign: 'left', maxWidth: 'none', margin: 0 }}>
+   404→   404→              Your money is protected by military-grade security
+   405→   405→            </h2>
+   406→   406→            <p style={{ ...S.sectionSub, textAlign: 'left', maxWidth: 'none', margin: 0 }}>
+   407→   407→              At CrestPoint Credit, security isn't an afterthought — it's the foundation.
+   408→   408→              Every transaction, every login, every data point is shielded by multiple
+   409→   409→              layers of protection that meet or exceed industry standards.
+   410→   410→            </p>
+   411→   411→            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '8px' }}>
+   412→   412→              {[
+   413→   413→                { icon: <IconShield />, title: 'End-to-End Encryption', desc: 'AES-256 encryption protects your data in transit and at rest. No one — not even our own team — can read your financial information.' },
+   414→   414→                { icon: <IconClock />, title: 'Real-Time Fraud Detection', desc: 'Our AI-powered system monitors every transaction 24/7, flagging suspicious activity instantly and locking accounts before damage is done.' },
+   415→   415→                { icon: <IconUsers />, title: 'KYC & AML Compliance', desc: 'Full identity verification with government ID scanning, biometric checks, and ongoing transaction monitoring to prevent money laundering.' },
+   416→   416→              ].map(item => (
+   417→   417→                <div key={item.title} style={{
+   418→   418→                  display: 'flex',
+   419→   419→                  gap: '16px',
+   420→   420→                  padding: '20px',
+   421→   421→                  backgroundColor: '#ffffff',
+   422→   422→                  borderRadius: '14px',
+   423→   423→                  border: '1px solid #e2e8f0',
+   424→   424→                }}>
+   425→   425→                  <div style={{
+   426→   426→                    display: 'flex',
+   427→   427→                    alignItems: 'center',
+   428→   428→                    justifyContent: 'center',
+   429→   429→                    width: '48px',
+   430→   430→                    height: '48px',
+   431→   431→                    borderRadius: '12px',
+   432→   432→                    backgroundColor: '#eff6ff',
+   433→   433→                    color: '#1a56db',
+   434→   434→                    flexShrink: 0,
+   435→   435→                  }}>{item.icon}</div>
+   436→   436→                  <div>
+   437→   437→                    <div style={{ fontSize: '15px', fontWeight: 600, color: '#0f172a', marginBottom: '4px' }}>{item.title}</div>
+   438→   438→                    <div style={{ fontSize: '14px', lineHeight: 1.6, color: '#64748b' }}>{item.desc}</div>
+   439→   439→                  </div>
+   440→   440→                </div>
+   441→   441→              ))}
+   442→   442→            </div>
+   443→   443→          </div>
+   444→   444→        </div>
+   445→   445→        <style>{`
+   446→   446→          @media (max-width: 900px) {
+   447→   447→            .lp-security-row {
+   448→   448→              flex-direction: column !important;
+   449→   449→              gap: 40px !important;
+   450→   450→            }
+   451→   451→            .lp-security-row > div {
+   452→   452→              flex: none !important;
+   453→   453→              width: 100% !important;
+   454→   454→            }
+   455→   455→          }
+   456→   456→        `}</style>
+   457→   457→      </section>
+   458→   458→
+   459→   459→      {/* ─── TESTIMONIALS ─── */}
+   460→   460→      <section style={S.section}>
+   461→   461→        <div style={S.sectionInner}>
+   462→   462→          <div style={{ textAlign: 'center', maxWidth: '600px', margin: '0 auto 48px' }}>
+   463→   463→            <div style={S.sectionBadge}>Testimonials</div>
+   464→   464→            <h2 style={S.sectionTitle}>Loved by thousands of customers</h2>
+   465→   465→          </div>
+   466→   466→          <div style={{
+   467→   467→            display: 'grid',
+   468→   468→            gridTemplateColumns: 'repeat(3, 1fr)',
+   469→   469→            gap: '24px',
+   470→   470→          }}
+   471→   471→          className="lp-testimonials-grid"
+   472→   472→          >
+   473→   473→            <TestimonialCard
+   474→   474→              quote="CrestPoint completely changed how I manage my finances. The instant transfers save me hours every week, and the real-time notifications give me total peace of mind. I've recommended it to everyone I know."
+   475→   475→              name="Sarah Mitchell"
+   476→   476→              role="Small Business Owner"
+   477→   477→              avatar="SM"
+   478→   478→            />
+   479→   479→            <TestimonialCard
+   480→   480→              quote="The security features are what won me over. Two-factor authentication, biometric login, and instant fraud alerts — I feel safer banking with CrestPoint than I ever did with my traditional bank."
+   481→   481→              name="David Chen"
+   482→   482→              role="Software Engineer"
+   483→   483→              avatar="DC"
+   484→   484→            />
+   485→   485→            <TestimonialCard
+   486→   486→              quote="As someone who sends money internationally regularly, CrestPoint's transfer speeds and transparent fee structure are a game changer. What used to take 3 days now takes seconds."
+   487→   487→              name="Amara Okafor"
+   488→   488→              role="Freelance Consultant"
+   489→   489→              avatar="AO"
+   490→   490→            />
+   491→   491→          </div>
+   492→   492→        </div>
+   493→   493→      </section>
+   494→   494→
+   495→   495→      {/* ─── TEAM / TRUST ─── */}
+   496→   496→      <section id="about" style={{ ...S.section, backgroundColor: '#f8fafc' }}>
+   497→   497→        <div style={S.sectionInner}>
+   498→   498→          <div style={{
+   499→   499→            display: 'flex',
+   500→   500→            alignItems: 'center',
+   501→   501→            gap: '80px',
+   502→   502→          }}
+   503→   503→          className="lp-about-row"
+   504→   504→          >
+   505→   505→            <div style={{ flex: '1 1 50%' }}>
+   506→   506→              <div style={S.sectionBadge}>About Us</div>
+   507→   507→              <h2 style={{ ...S.sectionTitle, textAlign: 'left', maxWidth: 'none', margin: 0 }}>
+   508→   508→                Built by bankers, <br />designed for everyone
+   509→   509→              </h2>
+   510→   510→              <p style={{ ...S.sectionSub, textAlign: 'left', maxWidth: 'none', margin: '0 0 32px 0' }}>
+   511→   511→                CrestPoint Credit was founded in 2022 by a team of financial industry veterans
+   512→   512→                and technology innovators who saw a gap between what traditional banks offered
+   513→   513→                and what modern customers needed. Our mission is simple: make world-class
+   514→   514→                banking accessible, secure, and effortless for everyone — regardless of where
+   515→   515→                they live or how much they earn.
+   516→   516→              </p>
+   517→   517→              <p style={{ ...S.sectionSub, textAlign: 'left', maxWidth: 'none', margin: '0 0 32px 0' }}>
+   518→   518→                Headquartered in the United States with operations spanning six continents,
+   519→   519→                CrestPoint serves individuals, small businesses, and enterprises with a unified
+   520→   520→                platform that handles everything from daily transactions to complex treasury
+   521→   521→                management. We hold full banking licenses and are regulated by top-tier
+   522→   522→                financial authorities, ensuring your deposits are always protected.
+   523→   523→              </p>
+   524→   524→              <div style={{
+   525→   525→                display: 'flex',
+   526→   526→                gap: '24px',
+   527→   527→                flexWrap: 'wrap',
+   528→   528→              }}>
+   529→   529→                {[
+   530→   530→                  { label: 'Customers', value: '50K+' },
+   531→   531→                  { label: 'Transaction Volume', value: '$2B+' },
+   532→   532→                  { label: 'Countries', value: '150+' },
+   533→   533→                  { label: 'Founded', value: '2022' },
+   534→   534→                ].map(stat => (
+   535→   535→                  <div key={stat.label} style={{
+   536→   536→                    padding: '16px 24px',
+   537→   537→                    backgroundColor: '#ffffff',
+   538→   538→                    borderRadius: '12px',
+   539→   539→                    border: '1px solid #e2e8f0',
+   540→   540→                    textAlign: 'center',
+   541→   541→                    minWidth: '110px',
+   542→   542→                  }}>
+   543→   543→                    <div style={{ fontSize: '22px', fontWeight: 800, color: '#1a56db' }}>{stat.value}</div>
+   544→   544→                    <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px', fontWeight: 500 }}>{stat.label}</div>
+   545→   545→                  </div>
+   546→   546→                ))}
+   547→   547→              </div>
+   548→   548→            </div>
+   549→   549→            <div style={{ flex: '1 1 45%' }}>
+   550→   550→              <img
+   551→   551→                src="/images/team.png"
+   552→   552→                alt="CrestPoint Credit team"
+   553→   553→                style={{
+   554→   554→                  width: '100%',
+   555→   555→                  borderRadius: '20px',
+   556→   556→                  boxShadow: '0 24px 64px rgba(26, 86, 219, 0.10)',
+   557→   557→                }}
+   558→   558→                loading="lazy"
+   559→   559→              />
+   560→   560→            </div>
+   561→   561→          </div>
+   562→   562→        </div>
+   563→   563→        <style>{`
+   564→   564→          @media (max-width: 900px) {
+   565→   565→            .lp-about-row {
+   566→   566→              flex-direction: column !important;
+   567→   567→              gap: 40px !important;
+   568→   568→            }
+   569→   569→            .lp-about-row > div {
+   570→   570→              flex: none !important;
+   571→   571→              width: 100% !important;
+   572→   572→            }
+   573→   573→          }
+   574→   574→        `}</style>
+   575→   575→      </section>
+   576→   576→
+   577→   577→      {/* ─── CTA ─── */}
+   578→   578→      <section style={S.ctaSection}>
+   579→   579→        <div style={S.ctaInner}>
+   580→   580→          <h2 style={{
+   581→   581→            fontSize: '40px',
+   582→   582→            fontWeight: 800,
+   583→   583→            color: '#ffffff',
+   584→   584→            margin: '0 0 16px 0',
+   585→   585→            lineHeight: 1.2,
+   586→   586→            textAlign: 'center',
+   587→   587→          }}>
+   588→   588→            Ready to experience <br />the future of banking?
+   589→   589→          </h2>
+   590→   590→          <p style={{
+   591→   591→            fontSize: '18px',
+   592→   592→            color: 'rgba(255,255,255,0.8)',
+   593→   593→            margin: '0 0 36px 0',
+   594→   594→            textAlign: 'center',
+   595→   595→            maxWidth: '500px',
+   596→   596→            lineHeight: 1.6,
+   597→   597→          }}>
+   598→   598→            Open your free account in under 2 minutes.
+   599→   599→            No minimum balance. No hidden fees. Just smarter banking.
+   600→   600→          </p>
+   601→   601→          <div style={{ display: 'flex', justifyContent: 'center', gap: '16px', flexWrap: 'wrap' }}>
+   602→   602→            <Link to="/register" style={{
+   603→   603→              display: 'inline-flex',
+   604→   604→              alignItems: 'center',
+   605→   605→              gap: '8px',
+   606→   606→              padding: '16px 36px',
+   607→   607→              fontSize: '16px',
+   608→   608→              fontWeight: 600,
+   609→   609→              color: '#1a56db',
+   610→   610→              backgroundColor: '#ffffff',
+   611→   611→              borderRadius: '12px',
+   612→   612→              textDecoration: 'none',
+   613→   613→              transition: 'transform 0.15s, box-shadow 0.15s',
+   614→   614→            }}>
+   615→   615→              Open Free Account <IconArrowRight />
+   616→   616→            </Link>
+   617→   617→            <Link to="/login" style={{
+   618→   618→              display: 'inline-flex',
+   619→   619→              alignItems: 'center',
+   620→   620→              padding: '16px 36px',
+   621→   621→              fontSize: '16px',
+   622→   622→              fontWeight: 600,
+   623→   623→              color: '#ffffff',
+   624→   624→              backgroundColor: 'rgba(255,255,255,0.12)',
+   625→   625→              border: '1px solid rgba(255,255,255,0.25)',
+   626→   626→              borderRadius: '12px',
+   627→   627→              textDecoration: 'none',
+   628→   628→              transition: 'background-color 0.15s',
+   629→   629→            }}>
+   630→   630→              Sign In
+   631→   631→            </Link>
+   632→   632→          </div>
+   633→   633→        </div>
+   634→   634→      </section>
+   635→   635→
+   636→   636→      {/* ─── FOOTER ─── */}
+   637→   637→      <footer style={S.footer}>
+   638→   638→        <div style={S.footerInner}>
+   639→   639→          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '40px' }}>
+   640→   640→            <div style={{ maxWidth: '300px' }}>
+   641→   641→              <div style={{ ...S.logo, marginBottom: '12px', fontSize: '18px' }}>
+   642→   642→                <span style={{
+   643→   643→                  display: 'inline-flex',
+   644→   644→                  alignItems: 'center',
+   645→   645→                  justifyContent: 'center',
+   646→   646→                  width: '32px',
+   647→   647→                  height: '32px',
+   648→   648→                  borderRadius: '8px',
+   649→   649→                  background: 'linear-gradient(135deg, #1a56db, #3b82f6)',
+   650→   650→                  color: '#fff',
+   651→   651→                  fontSize: '14px',
+   652→   652→                  fontWeight: 800,
+   653→   653→                  marginRight: '8px',
+   654→   654→                }}>C</span>
+   655→   655→                CrestPoint Credit
+   656→   656→              </div>
+   657→   657→              <p style={{ fontSize: '13px', lineHeight: 1.7, color: '#94a3b8', margin: 0 }}>
+   658→   658→                Next-generation digital banking for the modern economy.
+   659→   659→                Secure, fast, and built for everyone.
+   660→   660→              </p>
+   661→   661→            </div>
+   662→   662→            <div style={{ display: 'flex', gap: '48px', flexWrap: 'wrap' }}>
+   663→   663→              {[
+   664→   664→                {
+   665→   665→                  title: 'Product',
+   666→   666→                  links: ['Features', 'Security', 'Pricing', 'API Docs'],
+   667→   667→                },
+   668→   668→                {
+   669→   669→                  title: 'Company',
+   670→   670→                  links: ['About', 'Careers', 'Blog', 'Press'],
+   671→   671→                },
+   672→   672→                {
+   673→   673→                  title: 'Legal',
+   674→   674→                  links: ['Privacy Policy', 'Terms of Service', 'Cookie Policy', 'Compliance'],
+   675→   675→                },
+   676→   676→              ].map(col => (
+   677→   677→                <div key={col.title}>
+   678→   678→                  <div style={{ fontSize: '13px', fontWeight: 600, color: '#ffffff', marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{col.title}</div>
+   679→   679→                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+   680→   680→                    {col.links.map(link => (
+   681→   681→                      <a key={link} href="#" style={{
+   682→   682→                        fontSize: '14px',
+   683→   683→                        color: '#94a3b8',
+   684→   684→                        textDecoration: 'none',
+   685→   685→                        transition: 'color 0.15s',
+   686→   686→                      }}
+   687→   687→                      onMouseEnter={e => e.currentTarget.style.color = '#ffffff'}
+   688→   688→                      onMouseLeave={e => e.currentTarget.style.color = '#94a3b8'}
+   689→   689→                      >{link}</a>
+   690→   690→                    ))}
+   691→   691→                  </div>
+   692→   692→                </div>
+   693→   693→              ))}
+   694→   694→            </div>
+   695→   695→          </div>
+   696→   696→          <div style={{
+   697→   697→            borderTop: '1px solid rgba(255,255,255,0.08)',
+   698→   698→            marginTop: '48px',
+   699→   699→            paddingTop: '24px',
+   700→   700→            display: 'flex',
+   701→   701→            justifyContent: 'space-between',
+   702→   702→            alignItems: 'center',
+   703→   703→            flexWrap: 'wrap',
+   704→   704→            gap: '12px',
+   705→   705→          }}>
+   706→   706→            <span style={{ fontSize: '13px', color: '#64748b' }}>
+   707→   707→              &copy; {new Date().getFullYear()} CrestPoint Credit. All rights reserved.
+   708→   708→            </span>
+   709→   709→            <span style={{ fontSize: '13px', color: '#64748b' }}>
+   710→   710→              NMLS #123456 | FDIC Insured
+   711→   711→            </span>
+   712→   712→          </div>
+   713→   713→        </div>
+   714→   714→      </footer>
+   715→   715→
+   716→   716→      {/* ─── GLOBAL RESPONSIVE STYLES ─── */}
+   717→   717→      <style>{`
+   718→   718→        @media (max-width: 768px) {
+   719→   719→          .lp-nav-links { display: none !important; }
+   720→   720→          .lp-nav-cta { gap: 8px !important; }
+   721→   721→          .lp-nav-cta a { padding: 8px 14px !important; font-size: 13px !important; }
+   722→   722→          .lp-hero-img { display: none !important; }
+   723→   723→          .lp-testimonials-grid {
+   724→   724→            grid-template-columns: 1fr !important;
+   725→   725→          }
+   726→   726→        }
+   727→   727→      `}</style>
+   728→   728→    </div>
+   729→   729→  );
+   730→   730→}
+   731→   731→
+   732→   732→/* ═══════════════════════════════════
+   733→   733→   STYLES
+   734→   734→   ═══════════════════════════════════ */
+   735→   735→const S = {
+   736→   736→  page: {
+   737→   737→    fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif',
+   738→   738→    color: '#0f172a',
+   739→   739→    backgroundColor: '#ffffff',
+   740→   740→    overflowX: 'hidden',
+   741→   741→  },
+   742→   742→
+   743→   743→  /* NAV */
+   744→   744→  nav: {
+   745→   745→    position: 'fixed',
+   746→   746→    top: 0,
+   747→   747→    left: 0,
+   748→   748→    right: 0,
+   749→   749→    height: '72px',
+   750→   750→    zIndex: 1000,
+   751→   751→    transition: 'box-shadow 0.3s, background-color 0.3s, backdrop-filter 0.3s',
+   752→   752→  },
+   753→   753→  navInner: {
+   754→   754→    maxWidth: '1200px',
+   755→   755→    margin: '0 auto',
+   756→   756→    padding: '0 24px',
+   757→   757→    height: '100%',
+   758→   758→    display: 'flex',
+   759→   759→    alignItems: 'center',
+   760→   760→    justifyContent: 'space-between',
+   761→   761→  },
+   762→   762→  logo: {
+   763→   763→    fontSize: '20px',
+   764→   764→    fontWeight: 700,
+   765→   765→    color: '#0f172a',
+   766→   766→    textDecoration: 'none',
+   767→   767→    display: 'inline-flex',
+   768→   768→    alignItems: 'center',
+   769→   769→    letterSpacing: '-0.3px',
+   770→   770→  },
+   771→   771→  navLinks: {
+   772→   772→    display: 'flex',
+   773→   773→    gap: '8px',
+   774→   774→  },
+   775→   775→  navLink: {
+   776→   776→    fontSize: '15px',
+   777→   777→    fontWeight: 500,
+   778→   778→    color: '#334155',
+   779→   779→    textDecoration: 'none',
+   780→   780→    padding: '8px 16px',
+   781→   781→    borderRadius: '8px',
+   782→   782→    transition: 'color 0.15s, background-color 0.15s',
+   783→   783→  },
+   784→   784→  navCta: {
+   785→   785→    display: 'flex',
+   786→   786→    alignItems: 'center',
+   787→   787→    gap: '12px',
+   788→   788→  },
+   789→   789→
+   790→   790→  /* BUTTONS */
+   791→   791→  btnPrimary: {
+   792→   792→    display: 'inline-flex',
+   793→   793→    alignItems: 'center',
+   794→   794→    justifyContent: 'center',
+   795→   795→    padding: '10px 24px',
+   796→   796→    fontSize: '14px',
+   797→   797→    fontWeight: 600,
+   798→   798→    color: '#ffffff',
+   799→   799→    backgroundColor: '#1a56db',
+   800→   800→    borderRadius: '10px',
+   801→   801→    textDecoration: 'none',
+   802→   802→    transition: 'background-color 0.15s, transform 0.15s',
+   803→   803→    cursor: 'pointer',
+   804→   804→    border: 'none',
+   805→   805→    fontFamily: 'inherit',
+   806→   806→  },
+   807→   807→  btnGhost: {
+   808→   808→    display: 'inline-flex',
+   809→   809→    alignItems: 'center',
+   810→   810→    justifyContent: 'center',
+   811→   811→    padding: '10px 24px',
+   812→   812→    fontSize: '14px',
+   813→   813→    fontWeight: 500,
+   814→   814→    color: '#334155',
+   815→   815→    backgroundColor: 'transparent',
+   816→   816→    borderRadius: '10px',
+   817→   817→    textDecoration: 'none',
+   818→   818→    transition: 'color 0.15s, background-color 0.15s',
+   819→   819→    cursor: 'pointer',
+   820→   820→    border: 'none',
+   821→   821→    fontFamily: 'inherit',
+   822→   822→  },
+   823→   823→
+   824→   824→  /* HERO */
+   825→   825→  hero: {
+   826→   826→    paddingTop: '140px',
+   827→   827→    paddingBottom: '80px',
+   828→   828→    backgroundColor: '#ffffff',
+   829→   829→    position: 'relative',
+   830→   830→    overflow: 'hidden',
+   831→   831→  },
+   832→   832→  heroInner: {
+   833→   833→    maxWidth: '1200px',
+   834→   834→    margin: '0 auto',
+   835→   835→    padding: '0 24px',
+   836→   836→    display: 'flex',
+   837→   837→    alignItems: 'center',
+   838→   838→    gap: '48px',
+   839→   839→  },
+   840→   840→  heroContent: {
+   841→   841→    flex: '1 1 50%',
+   842→   842→    display: 'flex',
+   843→   843→    flexDirection: 'column',
+   844→   844→    gap: '24px',
+   845→   845→  },
+   846→   846→  heroBadge: {
+   847→   847→    display: 'inline-flex',
+   848→   848→    alignItems: 'center',
+   849→   849→    padding: '6px 16px',
+   850→   850→    fontSize: '13px',
+   851→   851→    fontWeight: 600,
+   852→   852→    color: '#1a56db',
+   853→   853→    backgroundColor: '#eff6ff',
+   854→   854→    borderRadius: '100px',
+   855→   855→    border: '1px solid #dbeafe',
+   856→   856→    width: 'fit-content',
+   857→   857→  },
+   858→   858→  heroTitle: {
+   859→   859→    fontSize: '52px',
+   860→   860→    fontWeight: 800,
+   861→   861→    color: '#0f172a',
+   862→   862→    lineHeight: 1.1,
+   863→   863→    margin: 0,
+   864→   864→    letterSpacing: '-0.03em',
+   865→   865→  },
+   866→   866→  heroSub: {
+   867→   867→    fontSize: '18px',
+   868→   868→    lineHeight: 1.7,
+   869→   869→    color: '#64748b',
+   870→   870→    margin: 0,
+   871→   871→    maxWidth: '520px',
+   872→   872→  },
+   873→   873→  heroActions: {
+   874→   874→    display: 'flex',
+   875→   875→    gap: '16px',
+   876→   876→    alignItems: 'center',
+   877→   877→    marginTop: '8px',
+   878→   878→  },
+   879→   879→  heroTrust: {
+   880→   880→    display: 'flex',
+   881→   881→    gap: '24px',
+   882→   882→    marginTop: '16px',
+   883→   883→    flexWrap: 'wrap',
+   884→   884→  },
+   885→   885→  trustItem: {
+   886→   886→    display: 'flex',
+   887→   887→    alignItems: 'center',
+   888→   888→    gap: '8px',
+   889→   889→    fontSize: '14px',
+   890→   890→    fontWeight: 500,
+   891→   891→    color: '#334155',
+   892→   892→  },
+   893→   893→  heroImageWrap: {
+   894→   894→    flex: '1 1 48%',
+   895→   895→  },
+   896→   896→  heroImage: {
+   897→   897→    width: '100%',
+   898→   898→    borderRadius: '20px',
+   899→   899→    boxShadow: '0 32px 80px rgba(26, 86, 219, 0.15)',
+   900→   900→  },
+   901→   901→
+   902→   902→  /* STATS BAR */
+   903→   903→  statsBar: {
+   904→   904→    background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)',
+   905→   905→    padding: '64px 24px',
+   906→   906→    display: 'flex',
+   907→   907→    justifyContent: 'center',
+   908→   908→    alignItems: 'center',
+   909→   909→    gap: '48px',
+   910→   910→    flexWrap: 'wrap',
+   911→   911→  },
+   912→   912→
+   913→   913→  /* SECTIONS */
+   914→   914→  section: {
+   915→   915→    padding: '100px 24px',
+   916→   916→  },
+   917→   917→  sectionInner: {
+   918→   918→    maxWidth: '1100px',
+   919→   919→    margin: '0 auto',
+   920→   920→  },
+   921→   921→  sectionBadge: {
+   922→   922→    display: 'inline-block',
+   923→   923→    padding: '5px 14px',
+   924→   924→    fontSize: '12px',
+   925→   925→    fontWeight: 700,
+   926→   926→    color: '#1a56db',
+   927→   927→    backgroundColor: '#eff6ff',
+   928→   928→    borderRadius: '100px',
+   929→   929→    textTransform: 'uppercase',
+   930→   930→    letterSpacing: '0.08em',
+   931→   931→    marginBottom: '16px',
+   932→   932→  },
+   933→   933→  sectionTitle: {
+   934→   934→    fontSize: '36px',
+   935→   935→    fontWeight: 800,
+   936→   936→    color: '#0f172a',
+   937→   937→    margin: '0 0 16px 0',
+   938→   938→    lineHeight: 1.2,
+   939→   939→    letterSpacing: '-0.02em',
+   940→   940→    maxWidth: '600px',
+   941→   941→  },
+   942→   942→  sectionSub: {
+   943→   943→    fontSize: '16px',
+   944→   944→    lineHeight: 1.7,
+   945→   945→    color: '#64748b',
+   946→   946→    margin: '0 auto',
+   947→   947→    maxWidth: '560px',
+   948→   948→  },
+   949→   949→
+   950→   950→  /* CTA */
+   951→   951→  ctaSection: {
+   952→   952→    background: 'linear-gradient(135deg, #1a56db 0%, #1e40af 40%, #0f172a 100%)',
+   953→   953→    padding: '100px 24px',
+   954→   954→  },
+   955→   955→  ctaInner: {
+   956→   956→    maxWidth: '700px',
+   957→   957→    margin: '0 auto',
+   958→   958→    display: 'flex',
+   959→   959→    flexDirection: 'column',
+   960→   960→    alignItems: 'center',
+   961→   961→  },
+   962→   962→
+   963→   963→  /* FOOTER */
+   964→   964→  footer: {
+   965→   965→    backgroundColor: '#0f172a',
+   966→   966→    padding: '64px 24px 32px',
+   967→   967→  },
+   968→   968→  footerInner: {
+   969→   969→    maxWidth: '1100px',
+   970→   970→    margin: '0 auto',
+   971→   971→  },
+   972→   972→};
