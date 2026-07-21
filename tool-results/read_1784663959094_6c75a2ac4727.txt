@@ -1,0 +1,858 @@
+     1→import logging
+     2→
+     3→from django.http import Http404
+     4→from django.utils.decorators import method_decorator
+     5→from django.utils import timezone
+     6→from django.views.decorators.cache import never_cache
+     7→from django.views.decorators.csrf import csrf_exempt
+     8→from rest_framework import status, filters, generics
+     9→from rest_framework.permissions import IsAuthenticated, BasePermission
+    10→
+    11→from crestpoint_credit.security.permissions import HasVerifiedKYC, IsAdminRole
+    12→from crestpoint_credit.security.throttling import TransferRateThrottle, TransactionRateThrottle
+    13→from rest_framework.response import Response
+    14→from rest_framework.views import APIView
+    15→from rest_framework.viewsets import ReadOnlyModelViewSet
+    16→
+    17→from crestpoint_credit.accounts.models import BankAccount
+    18→from crestpoint_credit.core.exceptions import (
+    19→    InsufficientFundsError,
+    20→    AccountLockedError,
+    21→    DailyLimitExceededError,
+    22→    TransferLimitExceededError,
+    23→    InvalidTransferError,
+    24→)
+    25→from .models import Transaction, WithdrawalOTP, WithdrawalRequest, WithdrawalRequestStatus
+    26→from .serializers import (
+    27→    DepositSerializer,
+    28→    WithdrawalSerializer,
+    29→    TransferSerializer,
+    30→    TransactionSerializer,
+    31→    TransactionDetailSerializer,
+    32→    WithdrawalRequestCreateSerializer,
+    33→    WithdrawalRequestSerializer,
+    34→    WithdrawalRequestAdminSerializer,
+    35→    AdminReviewWithdrawalSerializer,
+    36→)
+    37→from .services import (
+    38→    execute_deposit,
+    39→    execute_withdrawal,
+    40→    execute_transfer,
+    41→    get_transaction_history,
+    42→    reverse_transaction,
+    43→)
+    44→
+    45→logger = logging.getLogger(__name__)
+    46→
+    47→
+    48→# ---------------------------------------------------------------------------
+    49→# Permissions (string-referenced where possible)
+    50→# ---------------------------------------------------------------------------
+    51→
+    52→class IsOwner(BasePermission):
+    53→    """Allow access only if the transaction's account belongs to the user."""
+    54→
+    55→    def has_object_permission(self, request, view, obj):
+    56→        return obj.account.user_id == request.user.id
+    57→
+    58→
+    59→# ---------------------------------------------------------------------------
+    60→# Mixin for consistent error handling in operation views
+    61→# ---------------------------------------------------------------------------
+    62→
+    63→class _OperationViewMixin:
+    64→    """
+    65→    Provides a standard error-to-HTTP-status mapping for service-layer
+    66→    exceptions so that each operation view stays lean.
+    67→    """
+    68→
+    69→    _exception_map = {
+    70→        InsufficientFundsError: (
+    71→            "Insufficient funds.",
+    72→            status.HTTP_400_BAD_REQUEST,
+    73→        ),
+    74→        AccountLockedError: (
+    75→            "Account is locked or frozen.",
+    76→            status.HTTP_403_FORBIDDEN,
+    77→        ),
+    78→        DailyLimitExceededError: (
+    79→            "Daily transaction limit exceeded.",
+    80→            status.HTTP_429_TOO_MANY_REQUESTS,
+    81→        ),
+    82→        TransferLimitExceededError: (
+    83→            "Single transfer limit exceeded.",
+    84→            status.HTTP_400_BAD_REQUEST,
+    85→        ),
+    86→        InvalidTransferError: (
+    87→            "Invalid transfer request.",
+    88→            status.HTTP_400_BAD_REQUEST,
+    89→        ),
+    90→    }
+    91→
+    92→    def _handle_service_error(self, exc):
+    93→        """Return the appropriate Response for a known service exception."""
+    94→        for exc_class, (message, http_status) in self._exception_map.items():
+    95→            if isinstance(exc, exc_class):
+    96→                return Response(
+    97→                    {"detail": str(exc)},
+    98→                    status=http_status,
+    99→                )
+   100→        # Unexpected exception – re-raise so DRF's default handler catches it
+   101→        raise exc
+   102→
+   103→
+   104→# ---------------------------------------------------------------------------
+   105→# Operation views
+   106→# ---------------------------------------------------------------------------
+   107→
+   108→@method_decorator(never_cache, name="dispatch")
+   109→class DepositView(APIView, _OperationViewMixin):
+   110→    """
+   111→    POST /transactions/deposit/
+   112→    Create a deposit for the authenticated user's bank account.
+   113→    """
+   114→
+   115→    permission_classes = [IsAuthenticated, HasVerifiedKYC]
+   116→    throttle_classes = [TransactionRateThrottle]
+   117→
+   118→    def post(self, request):
+   119→        serializer = DepositSerializer(
+   120→            data=request.data, context={"request": request}
+   121→        )
+   122→        serializer.is_valid(raise_exception=True)
+   123→
+   124→        account = serializer._account
+   125→        amount = serializer.validated_data["amount"]
+   126→        description = serializer.validated_data.get("description", "")
+   127→
+   128→        try:
+   129→            txn = execute_deposit(account, amount, description)
+   130→        except Exception as exc:
+   131→            return self._handle_service_error(exc)
+   132→
+   133→        return Response(
+   134→            TransactionSerializer(txn).data,
+   135→            status=status.HTTP_201_CREATED,
+   136→        )
+   137→
+   138→
+   139→@method_decorator(never_cache, name="dispatch")
+   140→class WithdrawalView(APIView, _OperationViewMixin):
+   141→    """
+   142→    POST /transactions/withdraw/
+   143→    Create a withdrawal for the authenticated user's bank account.
+   144→    """
+   145→
+   146→    permission_classes = [IsAuthenticated, HasVerifiedKYC]
+   147→    throttle_classes = [TransactionRateThrottle]
+   148→
+   149→    def post(self, request):
+   150→        serializer = WithdrawalSerializer(
+   151→            data=request.data, context={"request": request}
+   152→        )
+   153→        serializer.is_valid(raise_exception=True)
+   154→
+   155→        account = serializer._account
+   156→        amount = serializer.validated_data["amount"]
+   157→        description = serializer.validated_data.get("description", "")
+   158→
+   159→        try:
+   160→            txn = execute_withdrawal(account, amount, description)
+   161→        except Exception as exc:
+   162→            return self._handle_service_error(exc)
+   163→
+   164→        return Response(
+   165→            TransactionSerializer(txn).data,
+   166→            status=status.HTTP_201_CREATED,
+   167→        )
+   168→
+   169→
+   170→@method_decorator(never_cache, name="dispatch")
+   171→class TransferView(APIView, _OperationViewMixin):
+   172→    """
+   173→    POST /transactions/transfer/
+   174→    Transfer funds between two bank accounts.
+   175→    """
+   176→
+   177→    permission_classes = [IsAuthenticated, HasVerifiedKYC]
+   178→    throttle_classes = [TransferRateThrottle]
+   179→
+   180→    def post(self, request):
+   181→        serializer = TransferSerializer(
+   182→            data=request.data, context={"request": request}
+   183→        )
+   184→        serializer.is_valid(raise_exception=True)
+   185→
+   186→        sender_account = serializer._sender_account
+   187→        recipient_account_number = serializer.validated_data["recipient_account_number"]
+   188→        amount = serializer.validated_data["amount"]
+   189→        description = serializer.validated_data.get("description", "")
+   190→
+   191→        try:
+   192→            sender_txn, recipient_txn = execute_transfer(
+   193→                sender_account, recipient_account_number, amount, description
+   194→            )
+   195→        except Exception as exc:
+   196→            return self._handle_service_error(exc)
+   197→
+   198→        return Response(
+   199→            {
+   200→                "sender_transaction": TransactionSerializer(sender_txn).data,
+   201→                "recipient_transaction": TransactionDetailSerializer(recipient_txn).data,
+   202→            },
+   203→            status=status.HTTP_201_CREATED,
+   204→        )
+   205→
+   206→
+   207→# ---------------------------------------------------------------------------
+   208→# History / detail views
+   209→# ---------------------------------------------------------------------------
+   210→
+   211→class TransactionHistoryView(generics.ListAPIView):
+   212→    """
+   213→    GET /transactions/history/
+   214→    Paginated transaction history for the authenticated user's accounts.
+   215→    """
+   216→
+   217→    permission_classes = [IsAuthenticated]
+   218→    serializer_class = TransactionSerializer
+   219→    filter_backends = [
+   220→        filters.SearchFilter,
+   221→        filters.OrderingFilter,
+   222→    ]
+   223→    search_fields = ["reference", "description"]
+   224→    ordering_fields = ["created_at", "amount"]
+   225→    ordering = ["-created_at"]
+   226→
+   227→    def get_queryset(self):
+   228→        user = self.request.user
+   229→        # Only transactions for accounts owned by this user
+   230→        account_ids = BankAccount.objects.filter(user=user).values_list(
+   231→            "id", flat=True
+   232→        )
+   233→        qs = Transaction.objects.filter(account_id__in=account_ids)
+   234→
+   235→        # Filter params
+   236→        account_id = self.request.query_params.get("account_id")
+   237→        if account_id:
+   238→            qs = qs.filter(account_id=account_id)
+   239→
+   240→        txn_type = self.request.query_params.get("transaction_type")
+   241→        if txn_type:
+   242→            qs = qs.filter(transaction_type=txn_type)
+   243→
+   244→        txn_status = self.request.query_params.get("status")
+   245→        if txn_status:
+   246→            qs = qs.filter(status=txn_status)
+   247→
+   248→        from_date = self.request.query_params.get("from_date")
+   249→        if from_date:
+   250→            qs = qs.filter(created_at__date__gte=from_date)
+   251→
+   252→        to_date = self.request.query_params.get("to_date")
+   253→        if to_date:
+   254→            qs = qs.filter(created_at__date__lte=to_date)
+   255→
+   256→        min_amount = self.request.query_params.get("min_amount")
+   257→        if min_amount:
+   258→            qs = qs.filter(amount__gte=min_amount)
+   259→
+   260→        max_amount = self.request.query_params.get("max_amount")
+   261→        if max_amount:
+   262→            qs = qs.filter(amount__lte=max_amount)
+   263→
+   264→        return qs
+   265→
+   266→
+   267→class TransactionDetailView(generics.RetrieveAPIView):
+   268→    """
+   269→    GET /transactions/<pk>/
+   270→    Retrieve a single transaction (own transactions only).
+   271→    """
+   272→
+   273→    permission_classes = [IsAuthenticated, IsOwner]
+   274→    serializer_class = TransactionDetailSerializer
+   275→
+   276→    def get_queryset(self):
+   277→        user = self.request.user
+   278→        account_ids = BankAccount.objects.filter(user=user).values_list(
+   279→            "id", flat=True
+   280→        )
+   281→        return Transaction.objects.filter(account_id__in=account_ids)
+   282→
+   283→
+   284→# ---------------------------------------------------------------------------
+   285→# Admin views
+   286→# ---------------------------------------------------------------------------
+   287→
+   288→class AdminTransactionViewSet(ReadOnlyModelViewSet):
+   289→    """
+   290→    GET /transactions/admin/
+   291→    Admin read-only access to all transactions.
+   292→    """
+   293→
+   294→    permission_classes = [IsAuthenticated, IsAdminRole]
+   295→    serializer_class = TransactionDetailSerializer
+   296→    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+   297→    search_fields = ["reference", "description"]
+   298→    ordering_fields = ["created_at", "amount"]
+   299→    ordering = ["-created_at"]
+   300→
+   301→    def get_queryset(self):
+   302→        qs = Transaction.objects.select_related("account", "recipient_account")
+   303→        params = self.request.query_params
+   304→
+   305→        # Filter params
+   306→        user_id = params.get("user")
+   307→        if user_id:
+   308→            qs = qs.filter(account__user_id=user_id)
+   309→
+   310→        account_id = params.get("account")
+   311→        if account_id:
+   312→            qs = qs.filter(account_id=account_id)
+   313→
+   314→        txn_type = params.get("type")
+   315→        if txn_type:
+   316→            qs = qs.filter(transaction_type=txn_type)
+   317→
+   318→        txn_status = params.get("status")
+   319→        if txn_status:
+   320→            qs = qs.filter(status=txn_status)
+   321→
+   322→        # Support both "flagged" and "is_flagged" param names
+   323→        flagged = params.get("flagged") or params.get("is_flagged")
+   324→        if flagged is not None and str(flagged).strip():
+   325→            qs = qs.filter(is_flagged=str(flagged).lower() in ("true", "1", "yes"))
+   326→
+   327→        # Support both "from_date"/"date_from" and "to_date"/"date_to"
+   328→        from_date = params.get("from_date") or params.get("date_from")
+   329→        if from_date:
+   330→            qs = qs.filter(created_at__date__gte=from_date)
+   331→
+   332→        to_date = params.get("to_date") or params.get("date_to")
+   333→        if to_date:
+   334→            qs = qs.filter(created_at__date__lte=to_date)
+   335→
+   336→        # Amount range filters
+   337→        min_amount = params.get("min_amount") or params.get("amount_min")
+   338→        if min_amount:
+   339→            qs = qs.filter(amount__gte=min_amount)
+   340→
+   341→        max_amount = params.get("max_amount") or params.get("amount_max")
+   342→        if max_amount:
+   343→            qs = qs.filter(amount__lte=max_amount)
+   344→
+   345→        # Exact reference filter
+   346→        reference = params.get("reference")
+   347→        if reference:
+   348→            qs = qs.filter(reference__iexact=reference)
+   349→
+   350→        return qs
+   351→
+   352→
+   353→class FlagTransactionView(APIView):
+   354→    """
+   355→    POST /transactions/<pk>/flag/
+   356→    Admin/support endpoint to flag a transaction for review.
+   357→    """
+   358→
+   359→    permission_classes = [IsAuthenticated, IsAdminRole]
+   360→
+   361→    def post(self, request, pk):
+   362→        try:
+   363→            txn = Transaction.objects.get(pk=pk)
+   364→        except Transaction.DoesNotExist:
+   365→            return Response(
+   366→                {"detail": "Transaction not found."},
+   367→                status=status.HTTP_404_NOT_FOUND,
+   368→            )
+   369→
+   370→        reason = request.data.get("reason", "")
+   371→        txn.is_flagged = True
+   372→        txn.flag_reason = reason
+   373→        txn.save(update_fields=["is_flagged", "flag_reason", "updated_at"])
+   374→
+   375→        return Response(
+   376→            TransactionDetailSerializer(txn).data,
+   377→            status=status.HTTP_200_OK,
+   378→        )
+   379→
+   380→
+   381→class UnflagTransactionView(APIView):
+   382→    """
+   383→    POST /transactions/<pk>/unflag/
+   384→    Admin endpoint to remove a flag from a transaction.
+   385→    """
+   386→
+   387→    permission_classes = [IsAuthenticated, IsAdminRole]
+   388→
+   389→    def post(self, request, pk):
+   390→        try:
+   391→            txn = Transaction.objects.get(pk=pk)
+   392→        except Transaction.DoesNotExist:
+   393→            return Response(
+   394→                {"detail": "Transaction not found."},
+   395→                status=status.HTTP_404_NOT_FOUND,
+   396→            )
+   397→
+   398→        txn.is_flagged = False
+   399→        txn.flag_reason = ""
+   400→        txn.save(update_fields=["is_flagged", "flag_reason", "updated_at"])
+   401→
+   402→        return Response(
+   403→            {"message": "Transaction unflagged successfully."},
+   404→            status=status.HTTP_200_OK,
+   405→        )
+   406→
+   407→
+   408→class ReverseTransactionView(APIView, _OperationViewMixin):
+   409→    """
+   410→    POST /transactions/<pk>/reverse/
+   411→    Admin endpoint to reverse a completed transaction.
+   412→    """
+   413→
+   414→    permission_classes = [IsAuthenticated, IsAdminRole]
+   415→
+   416→    def post(self, request, pk):
+   417→        reason = request.data.get("reason", "Admin-initiated reversal.")
+   418→        try:
+   419→            txn = Transaction.objects.get(pk=pk)
+   420→        except Transaction.DoesNotExist:
+   421→            return Response(
+   422→                {"detail": "Transaction not found."},
+   423→                status=status.HTTP_404_NOT_FOUND,
+   424→            )
+   425→
+   426→        try:
+   427→            reversed_txn = reverse_transaction(txn, reason)
+   428→        except Exception as exc:
+   429→            return self._handle_service_error(exc)
+   430→
+   431→        logger.info(
+   432→            "Transaction %s reversed by admin %s",
+   433→            txn.reference,
+   434→            request.user.email,
+   435→        )
+   436→
+   437→        return Response(
+   438→            {
+   439→                "message": f"Transaction {txn.reference} reversed successfully.",
+   440→                "original_status": reversed_txn.status,
+   441→            },
+   442→            status=status.HTTP_200_OK,
+   443→        )
+   444→
+   445→
+   446→class AdminTransactionStatsView(APIView):
+   447→    """
+   448→    GET /transactions/admin/stats/
+   449→    Returns aggregated stats for the admin dashboard.
+   450→    """
+   451→
+   452→    permission_classes = [IsAuthenticated, IsAdminRole]
+   453→
+   454→    def get(self, request):
+   455→        from django.db.models import Sum, Count, Q, F
+   456→        from crestpoint_credit.accounts.models import BankAccount
+   457→
+   458→        from datetime import timedelta
+   459→        from django.utils import timezone
+   460→
+   461→        today = timezone.now().date()
+   462→
+   463→        # Total platform balance
+   464→        total_balance = BankAccount.objects.filter(
+   465→            is_active=True
+   466→        ).aggregate(total=Sum("balance"))["total"] or 0
+   467→
+   468→        # Active accounts count
+   469→        active_accounts = BankAccount.objects.filter(
+   470→            is_active=True
+   471→        ).count()
+   472→
+   473→        # Today's transactions volume and count
+   474→        today_txns = Transaction.objects.filter(
+   475→            created_at__date=today,
+   476→            status="completed",
+   477→        )
+   478→        today_volume = today_txns.aggregate(vol=Sum("amount"))["vol"] or 0
+   479→        today_count = today_txns.count()
+   480→
+   481→        # Flagged count
+   482→        flagged_count = Transaction.objects.filter(is_flagged=True).count()
+   483→
+   484→        # Failed count
+   485→        failed_count = Transaction.objects.filter(status="failed").count()
+   486→
+   487→        # Pending count
+   488→        pending_count = Transaction.objects.filter(status="pending").count()
+   489→
+   490→        # Frozen accounts count
+   491→        frozen_count = BankAccount.objects.filter(is_frozen=True).count()
+   492→
+   493→        return Response({
+   494→            "total_balance": str(total_balance),
+   495→            "active_accounts": active_accounts,
+   496→            "today_volume": str(today_volume),
+   497→            "today_transaction_count": today_count,
+   498→            "flagged_count": flagged_count,
+   499→            "failed_count": failed_count,
+   500→            "pending_count": pending_count,
+   501→            "frozen_accounts": frozen_count,
+   502→        })
+   503→
+   504→
+   505→class AdminCSVExportView(APIView):
+   506→    """
+   507→    GET /transactions/admin/export-csv/
+   508→    Export filtered transactions as CSV. Returns the file as a download.
+   509→    """
+   510→
+   511→    permission_classes = [IsAuthenticated, IsAdminRole]
+   512→
+   513→    def get(self, request):
+   514→        import csv
+   515→        import io
+   516→
+   517→        from django.http import HttpResponse
+   518→
+   519→        qs = Transaction.objects.select_related("account", "account__user", "recipient_account")
+   520→        params = request.query_params
+   521→
+   522→        # Apply same filters as AdminTransactionViewSet
+   523→        user_id = params.get("user")
+   524→        if user_id:
+   525→            qs = qs.filter(account__user_id=user_id)
+   526→        account_id = params.get("account")
+   527→        if account_id:
+   528→            qs = qs.filter(account_id=account_id)
+   529→        txn_type = params.get("type")
+   530→        if txn_type:
+   531→            qs = qs.filter(transaction_type=txn_type)
+   532→        txn_status = params.get("status")
+   533→        if txn_status:
+   534→            qs = qs.filter(status=txn_status)
+   535→        # Support both "flagged" and "is_flagged" param names
+   536→        flagged = params.get("flagged") or params.get("is_flagged")
+   537→        if flagged is not None and str(flagged).strip():
+   538→            qs = qs.filter(is_flagged=str(flagged).lower() in ("true", "1", "yes"))
+   539→        # Support both "from_date"/"date_from" and "to_date"/"date_to"
+   540→        from_date = params.get("from_date") or params.get("date_from")
+   541→        if from_date:
+   542→            qs = qs.filter(created_at__date__gte=from_date)
+   543→        to_date = params.get("to_date") or params.get("date_to")
+   544→        if to_date:
+   545→            qs = qs.filter(created_at__date__lte=to_date)
+   546→        # Amount range filters
+   547→        min_amount = params.get("min_amount") or params.get("amount_min")
+   548→        if min_amount:
+   549→            qs = qs.filter(amount__gte=min_amount)
+   550→        max_amount = params.get("max_amount") or params.get("amount_max")
+   551→        if max_amount:
+   552→            qs = qs.filter(amount__lte=max_amount)
+   553→        # Exact reference filter
+   554→        reference = params.get("reference")
+   555→        if reference:
+   556→            qs = qs.filter(reference__iexact=reference)
+   557→
+   558→        # Limit export to 10000 rows
+   559→        qs = qs.order_by("-created_at")[:10000]
+   560→
+   561→        # Build CSV
+   562→        output = io.StringIO()
+   563→        writer = csv.writer(output)
+   564→        writer.writerow([
+   565→            "ID", "Reference", "Type", "Status", "Account Number",
+   566→            "User Email", "Amount", "Balance Before", "Balance After",
+   567→            "Description", "Flagged", "Flag Reason", "Created At",
+   568→        ])
+   569→        for txn in qs:
+   570→            writer.writerow([
+   571→                txn.id,
+   572→                txn.reference,
+   573→                txn.transaction_type,
+   574→                txn.status,
+   575→                txn.account.account_number,
+   576→                txn.account.user.email if txn.account.user else "",
+   577→                str(txn.amount),
+   578→                str(txn.balance_before),
+   579→                str(txn.balance_after),
+   580→                txn.description,
+   581→                txn.is_flagged,
+   582→                txn.flag_reason,
+   583→                txn.created_at.isoformat() if txn.created_at else "",
+   584→        ])
+   585→
+   586→        response = HttpResponse(
+   587→            output.getvalue(),
+   588→            content_type="text/csv",
+   589→        )
+   590→        response["Content-Disposition"] = 'attachment; filename="transactions_export.csv"'
+   591→        return response
+   592→
+   593→
+   594→# ---------------------------------------------------------------------------
+   595→# Withdrawal Request views (user-facing)
+   596→# ---------------------------------------------------------------------------
+   597→
+   598→@method_decorator(never_cache, name="dispatch")
+   599→class WithdrawalRequestCreateView(APIView):
+   600→    """
+   601→    POST /transactions/withdrawal-requests/
+   602→    User creates a withdrawal request. It stays 'pending' until an admin
+   603→    approves or rejects it.
+   604→    """
+   605→
+   606→    permission_classes = [IsAuthenticated]
+   607→    throttle_classes = [TransactionRateThrottle]
+   608→
+   609→    def post(self, request):
+   610→        serializer = WithdrawalRequestCreateSerializer(
+   611→            data=request.data, context={"request": request}
+   612→        )
+   613→        serializer.is_valid(raise_exception=True)
+   614→
+   615→        account = serializer._account
+   616→        amount = serializer.validated_data["amount"]
+   617→        otp = serializer._otp
+   618→
+   619→        # Mark OTP as used
+   620→        otp.is_used = True
+   621→        otp.used_at = timezone.now()
+   622→        otp.save(update_fields=["is_used", "used_at"])
+   623→
+   624→        wr = WithdrawalRequest.objects.create(
+   625→            account=account,
+   626→            amount=amount,
+   627→            description=serializer.validated_data.get("description", ""),
+   628→            bank_name=serializer.validated_data.get("bank_name", ""),
+   629→            account_number=serializer.validated_data.get("account_number", ""),
+   630→            routing_number=serializer.validated_data.get("routing_number", ""),
+   631→            status=WithdrawalRequestStatus.PENDING,
+   632→            metadata={"otp_id": otp.id},
+   633→        )
+   634→
+   635→        logger.info(
+   636→            "Withdrawal request %s created by %s for account %s – amount: %s (OTP %s)",
+   637→            wr.reference,
+   638→            request.user.email,
+   639→            account.account_number,
+   640→            amount,
+   641→            otp.code,
+   642→        )
+   643→
+   644→        return Response(
+   645→            WithdrawalRequestSerializer(wr).data,
+   646→            status=status.HTTP_201_CREATED,
+   647→        )
+   648→
+   649→
+   650→class WithdrawalRequestListView(generics.ListAPIView):
+   651→    """
+   652→    GET /transactions/withdrawal-requests/
+   653→    List the authenticated user's withdrawal requests.
+   654→    """
+   655→
+   656→    permission_classes = [IsAuthenticated]
+   657→    serializer_class = WithdrawalRequestSerializer
+   658→    ordering = ["-created_at"]
+   659→
+   660→    def get_queryset(self):
+   661→        account_ids = BankAccount.objects.filter(
+   662→            user=self.request.user
+   663→        ).values_list("id", flat=True)
+   664→        qs = WithdrawalRequest.objects.filter(account_id__in=account_ids)
+   665→
+   666→        wr_status = self.request.query_params.get("status")
+   667→        if wr_status:
+   668→            qs = qs.filter(status=wr_status)
+   669→
+   670→        return qs
+   671→
+   672→
+   673→class WithdrawalRequestDetailView(generics.RetrieveAPIView):
+   674→    """
+   675→    GET /transactions/withdrawal-requests/<pk>/
+   676→    Retrieve a single withdrawal request (own requests only).
+   677→    """
+   678→
+   679→    permission_classes = [IsAuthenticated]
+   680→    serializer_class = WithdrawalRequestSerializer
+   681→
+   682→    def get_queryset(self):
+   683→        account_ids = BankAccount.objects.filter(
+   684→            user=self.request.user
+   685→        ).values_list("id", flat=True)
+   686→        return WithdrawalRequest.objects.filter(account_id__in=account_ids)
+   687→
+   688→
+   689→# ---------------------------------------------------------------------------
+   690→# Withdrawal Request views (admin)
+   691→# ---------------------------------------------------------------------------
+   692→
+   693→class AdminWithdrawalRequestListView(generics.ListAPIView):
+   694→    """
+   695→    GET /transactions/withdrawal-requests/admin/
+   696→    Admin can list all withdrawal requests, optionally filtered by status.
+   697→    """
+   698→
+   699→    permission_classes = [IsAuthenticated, IsAdminRole]
+   700→    serializer_class = WithdrawalRequestAdminSerializer
+   701→    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+   702→    search_fields = ["reference", "account__account_number", "account__user__email"]
+   703→    ordering_fields = ["created_at", "amount"]
+   704→    ordering = ["-created_at"]
+   705→
+   706→    def get_queryset(self):
+   707→        qs = WithdrawalRequest.objects.select_related("account", "account__user", "reviewed_by")
+   708→
+   709→        wr_status = self.request.query_params.get("status")
+   710→        if wr_status:
+   711→            qs = qs.filter(status=wr_status)
+   712→
+   713→        return qs
+   714→
+   715→
+   716→class AdminReviewWithdrawalView(APIView, _OperationViewMixin):
+   717→    """
+   718→    POST /transactions/withdrawal-requests/<pk>/review/
+   719→    Admin approves or rejects a pending withdrawal request.
+   720→
+   721→    On approve: funds are deducted from the user's account and a completed
+   722→    withdrawal Transaction is created.
+   723→    On reject: no balance change; the rejection reason is stored.
+   724→    """
+   725→
+   726→    permission_classes = [IsAuthenticated, IsAdminRole]
+   727→
+   728→    def post(self, request, pk):
+   729→        try:
+   730→            wr = WithdrawalRequest.objects.select_related("account").get(pk=pk)
+   731→        except WithdrawalRequest.DoesNotExist:
+   732→            return Response(
+   733→                {"detail": "Withdrawal request not found."},
+   734→                status=status.HTTP_404_NOT_FOUND,
+   735→            )
+   736→
+   737→        if wr.status != WithdrawalRequestStatus.PENDING:
+   738→            return Response(
+   739→                {"detail": f"This request is already {wr.status} and cannot be reviewed again."},
+   740→                status=status.HTTP_400_BAD_REQUEST,
+   741→            )
+   742→
+   743→        serializer = AdminReviewWithdrawalSerializer(data=request.data)
+   744→        serializer.is_valid(raise_exception=True)
+   745→
+   746→        action = serializer.validated_data["action"]
+   747→        rejection_reason = serializer.validated_data.get("rejection_reason", "")
+   748→
+   749→        if action == "approve":
+   750→            try:
+   751→                txn = execute_withdrawal(
+   752→                    wr.account,
+   753→                    wr.amount,
+   754→                    description=f"Withdrawal request {wr.reference}",
+   755→                )
+   756→                wr.status = WithdrawalRequestStatus.APPROVED
+   757→                wr.reviewed_by = request.user
+   758→                wr.reviewed_at = timezone.now()
+   759→                wr.metadata = {**wr.metadata, "transaction_id": txn.id}
+   760→                wr.save()
+   761→
+   762→                logger.info(
+   763→                    "Withdrawal request %s APPROVED by %s – transaction %s",
+   764→                    wr.reference,
+   765→                    request.user.email,
+   766→                    txn.reference,
+   767→                )
+   768→
+   769→                return Response(
+   770→                    {
+   771→                        "message": "Withdrawal request approved and processed.",
+   772→                        "request": WithdrawalRequestAdminSerializer(wr).data,
+   773→                        "transaction": TransactionSerializer(txn).data,
+   774→                    },
+   775→                    status=status.HTTP_200_OK,
+   776→                )
+   777→
+   778→            except Exception as exc:
+   779→                return self._handle_service_error(exc)
+   780→
+   781→        elif action == "reject":
+   782→            wr.status = WithdrawalRequestStatus.REJECTED
+   783→            wr.reviewed_by = request.user
+   784→            wr.reviewed_at = timezone.now()
+   785→            wr.rejection_reason = rejection_reason
+   786→            wr.save()
+   787→
+   788→            logger.info(
+   789→                "Withdrawal request %s REJECTED by %s – reason: %s",
+   790→                wr.reference,
+   791→                request.user.email,
+   792→                rejection_reason,
+   793→            )
+   794→
+   795→            return Response(
+   796→                {
+   797→                    "message": "Withdrawal request rejected.",
+   798→                    "request": WithdrawalRequestAdminSerializer(wr).data,
+   799→                },
+   800→                status=status.HTTP_200_OK,
+   801→            )
+   802→
+   803→
+   804→# ────────────────────────────────────────────────────────────────────
+   805→# Admin: Generate Withdrawal OTP
+   806→# ────────────────────────────────────────────────────────────────────
+   807→
+   808→class AdminGenerateWithdrawalOTPView(APIView):
+   809→    """
+   810→    POST /transactions/withdrawal-requests/generate-otp/
+   811→    Admin generates a one-time OTP for a user. The user must provide
+   812→    this OTP when creating a withdrawal request.
+   813→
+   814→    Body: {"user_id": <int>}
+   815→    Response: {"code": "A3F1B2", "expires_at": "...", "user_email": "..."}
+   816→    """
+   817→    permission_classes = [IsAuthenticated, IsAdminRole]
+   818→
+   819→    def post(self, request):
+   820→        from .serializers import GenerateWithdrawalOTPSerializer
+   821→        from crestpoint_credit.accounts.models import User
+   822→
+   823→        serializer = GenerateWithdrawalOTPSerializer(data=request.data)
+   824→        serializer.is_valid(raise_exception=True)
+   825→
+   826→        user_id = serializer.validated_data["user_id"]
+   827→        user = User.objects.get(pk=user_id)
+   828→
+   829→        # Invalidate any previous active OTPs for this user
+   830→        WithdrawalOTP.objects.filter(
+   831→            user=user, is_used=False
+   832→        ).update(is_used=True)
+   833→
+   834→        # Create new OTP
+   835→        otp = WithdrawalOTP.objects.create(
+   836→            user=user,
+   837→            created_by=request.user,
+   838→        )
+   839→
+   840→        from datetime import timedelta
+   841→        expires_at = otp.created_at + timedelta(minutes=WithdrawalOTP.OTP_TTL_MINUTES)
+   842→
+   843→        logger.info(
+   844→            "Withdrawal OTP %s generated for user %s by admin %s",
+   845→            otp.code, user.email, request.user.email,
+   846→        )
+   847→
+   848→        return Response(
+   849→            {
+   850→                "code": otp.code,
+   851→                "expires_at": expires_at.isoformat(),
+   852→                "user_id": user.id,
+   853→                "user_email": user.email,
+   854→                "user_full_name": f"{user.first_name} {user.last_name}".strip(),
+   855→            },
+   856→            status=status.HTTP_201_CREATED,
+   857→        )
+   858→

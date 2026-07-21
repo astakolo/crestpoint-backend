@@ -1,0 +1,1541 @@
+     1→import React, { useState, useEffect, useCallback, Component } from 'react';
+     2→import Navbar from '../../components/common/Navbar';
+     3→import investmentService from '../../services/investmentService';
+     4→import accountService from '../../services/accountService';
+     5→import toast from 'react-hot-toast';
+     6→
+     7→// ErrorBoundary to catch runtime crashes and show feedback instead of white page
+     8→class InvestmentErrorBoundary extends Component {
+     9→  constructor(props) {
+    10→    super(props);
+    11→    this.state = { hasError: false, error: null };
+    12→  }
+    13→  static getDerivedStateFromError(error) {
+    14→    return { hasError: true, error };
+    15→  }
+    16→  componentDidCatch(error, info) {
+    17→    console.error('[InvestmentsPage]', error, info);
+    18→  }
+    19→  render() {
+    20→    if (this.state.hasError) {
+    21→      return (
+    22→        <div style={{
+    23→          minHeight: '100vh',
+    24→          display: 'flex',
+    25→          alignItems: 'center',
+    26→          justifyContent: 'center',
+    27→          backgroundColor: '#f9fafb',
+    28→          fontFamily: 'Inter, -apple-system, sans-serif',
+    29→        }}>
+    30→          <div style={{
+    31→            backgroundColor: '#ffffff',
+    32→            borderRadius: '12px',
+    33→            border: '1px solid #e5e7eb',
+    34→            padding: '48px 32px',
+    35→            textAlign: 'center',
+    36→            maxWidth: '420px',
+    37→            boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+    38→          }}>
+    39→            <div style={{ fontSize: '48px', marginBottom: '16px' }}>⚠️</div>
+    40→            <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#111827', margin: '0 0 8px 0' }}>
+    41→              Something went wrong
+    42→            </h2>
+    43→            <p style={{ fontSize: '14px', color: '#6b7280', margin: '0 0 24px 0' }}>
+    44→              {this.state.error?.message || 'An unexpected error occurred loading this page.'}
+    45→            </p>
+    46→            <button
+    47→              onClick={() => { this.setState({ hasError: false, error: null }); }}
+    48→              style={{
+    49→                padding: '10px 24px',
+    50→                fontSize: '14px',
+    51→                fontWeight: 600,
+    52→                color: '#ffffff',
+    53→                backgroundColor: '#1a56db',
+    54→                border: 'none',
+    55→                borderRadius: '8px',
+    56→                cursor: 'pointer',
+    57→                fontFamily: 'Inter, -apple-system, sans-serif',
+    58→              }}
+    59→            >
+    60→              Try Again
+    61→            </button>
+    62→          </div>
+    63→        </div>
+    64→      );
+    65→    }
+    66→    return this.props.children;
+    67→  }
+    68→}
+    69→
+    70→const TABS = [
+    71→  { key: 'market', label: 'Market' },
+    72→  { key: 'portfolio', label: 'Portfolio' },
+    73→  { key: 'account', label: 'Investment Account' },
+    74→];
+    75→
+    76→function formatCurrency(amount, currency = 'USD') {
+    77→  const n = parseFloat(amount);
+    78→  if (isNaN(n)) return '$0.00';
+    79→  return new Intl.NumberFormat('en-US', { style: 'currency', currency, minimumFractionDigits: 2 }).format(n);
+    80→}
+    81→
+    82→function formatNumber(num) {
+    83→  const n = parseFloat(num);
+    84→  if (isNaN(n)) return '—';
+    85→  if (n >= 1e12) return (n / 1e12).toFixed(2) + 'T';
+    86→  if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+    87→  if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+    88→  if (n >= 1e3) return (n / 1e3).toFixed(2) + 'K';
+    89→  return n.toFixed(2);
+    90→}
+    91→
+    92→function formatDate(dateString) {
+    93→  if (!dateString) return '—';
+    94→  const d = new Date(dateString);
+    95→  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+    96→}
+    97→
+    98→function InvestmentsPage() {
+    99→  const [activeTab, setActiveTab] = useState('market');
+   100→
+   101→  // Market state
+   102→  const [stocks, setStocks] = useState([]);
+   103→  const [marketLoading, setMarketLoading] = useState(true);
+   104→  const [marketSearch, setMarketSearch] = useState('');
+   105→
+   106→  // Portfolio state
+   107→  const [holdings, setHoldings] = useState([]);
+   108→  const [portfolioLoading, setPortfolioLoading] = useState(true);
+   109→  const [portfolioSummary, setPortfolioSummary] = useState({
+   110→    total_invested: 0,
+   111→    current_value: 0,
+   112→    total_pnl: 0,
+   113→  });
+   114→
+   115→  // Investment account state
+   116→  const [investmentAccount, setInvestmentAccount] = useState(null);
+   117→  const [accountLoading, setAccountLoading] = useState(true);
+   118→  const [investmentTransactions, setInvestmentTransactions] = useState([]);
+   119→  const [transactionsLoading, setTransactionsLoading] = useState(true);
+   120→
+   121→  // Bank accounts for deposit/buy modals
+   122→  const [bankAccounts, setBankAccounts] = useState([]);
+   123→
+   124→  // Buy modal
+   125→  const [buyModal, setBuyModal] = useState({ open: false, stock: null });
+   126→  const [buyQuantity, setBuyQuantity] = useState('');
+   127→  const [buyAccountId, setBuyAccountId] = useState('');
+   128→  const [buying, setBuying] = useState(false);
+   129→
+   130→  // Sell modal
+   131→  const [sellModal, setSellModal] = useState({ open: false, holding: null });
+   132→  const [sellQuantity, setSellQuantity] = useState('');
+   133→  const [selling, setSelling] = useState(false);
+   134→
+   135→  // Deposit modal
+   136→  const [depositModal, setDepositModal] = useState(false);
+   137→  const [depositAccountId, setDepositAccountId] = useState('');
+   138→  const [depositAmount, setDepositAmount] = useState('');
+   139→  const [depositing, setDepositing] = useState(false);
+   140→
+   141→  // Fetch bank accounts (used across tabs)
+   142→  useEffect(() => {
+   143→    const fetchBankAccounts = async () => {
+   144→      try {
+   145→        const data = await accountService.getAccounts();
+   146→        const accs = Array.isArray(data) ? data : data?.results || data?.data || [];
+   147→        setBankAccounts(accs.filter((a) => a.is_active && !a.is_frozen));
+   148→      } catch {
+   149→        // Non-critical
+   150→      }
+   151→    };
+   152→    fetchBankAccounts();
+   153→  }, []);
+   154→
+   155→  // ── Market Tab ──────────────────────────────────────────────
+   156→  const fetchStocks = useCallback(async () => {
+   157→    setMarketLoading(true);
+   158→    setMarketError('');
+   159→    try {
+   160→      const data = await investmentService.getMarketStocks();
+   161→      setStocks(Array.isArray(data) ? data : data?.results || data?.stocks || []);
+   162→    } catch (err) {
+   163→      const msg = err?.response?.data?.detail || 'Failed to load market data';
+   164→      setMarketError(msg);
+   165→      toast.error(msg);
+   166→    } finally {
+   167→      setMarketLoading(false);
+   168→    }
+   169→  }, []);
+   170→
+   171→  useEffect(() => {
+   172→    if (activeTab === 'market') fetchStocks();
+   173→  }, [activeTab, fetchStocks]);
+   174→
+   175→  const filteredStocks = stocks.filter((s) => {
+   176→    if (!marketSearch) return true;
+   177→    const q = marketSearch.toLowerCase();
+   178→    return (
+   179→      (s.symbol || '').toLowerCase().includes(q) ||
+   180→      (s.name || '').toLowerCase().includes(q)
+   181→    );
+   182→  });
+   183→
+   184→  const openBuyModal = (stock) => {
+   185→    setBuyModal({ open: true, stock });
+   186→    setBuyQuantity('');
+   187→    setBuyAccountId(bankAccounts[0]?.id || '');
+   188→  };
+   189→
+   190→  const closeBuyModal = () => {
+   191→    setBuyModal({ open: false, stock: null });
+   192→    setBuyQuantity('');
+   193→    setBuyAccountId('');
+   194→  };
+   195→
+   196→  const handleBuy = async () => {
+   197→    const qty = parseInt(buyQuantity, 10);
+   198→    if (!qty || qty <= 0) {
+   199→      toast.error('Please enter a valid quantity');
+   200→      return;
+   201→    }
+   202→    if (!buyAccountId) {
+   203→      toast.error('Please select a bank account');
+   204→      return;
+   205→    }
+   206→    setBuying(true);
+   207→    try {
+   208→      await investmentService.buyStock({
+   209→        stock_id: buyModal.stock.id || buyModal.stock.symbol,
+   210→        symbol: buyModal.stock.symbol,
+   211→        quantity: qty,
+   212→        account_id: buyAccountId,
+   213→      });
+   214→      toast.success(`Successfully purchased ${qty} share${qty > 1 ? 's' : ''} of ${buyModal.stock.symbol}`);
+   215→      closeBuyModal();
+   216→      fetchStocks();
+   217→      // Refresh portfolio if already loaded
+   218→      fetchPortfolio();
+   219→      fetchInvestmentAccount();
+   220→    } catch (err) {
+   221→      toast.error(err?.response?.data?.detail || 'Purchase failed');
+   222→    } finally {
+   223→      setBuying(false);
+   224→    }
+   225→  };
+   226→
+   227→  // ── Portfolio Tab ───────────────────────────────────────────
+   228→  const fetchPortfolio = useCallback(async () => {
+   229→    setPortfolioLoading(true);
+   230→    setPortfolioError('');
+   231→    try {
+   232→      const data = await investmentService.getPortfolio();
+   233→      const holdingsList = Array.isArray(data) ? data : data?.holdings || data?.results || [];
+   234→      setHoldings(holdingsList);
+   235→      setPortfolioSummary({
+   236→        total_invested: data?.total_invested || holdingsList.reduce((s, h) => s + (h.total_cost || 0), 0),
+   237→        current_value: data?.current_value || holdingsList.reduce((s, h) => s + (h.current_value || 0), 0),
+   238→        total_pnl: data?.total_pnl || holdingsList.reduce((s, h) => s + (h.pnl || 0), 0),
+   239→      });
+   240→    } catch (err) {
+   241→      const msg = err?.response?.data?.detail || 'Failed to load portfolio';
+   242→      setPortfolioError(msg);
+   243→      toast.error(msg);
+   244→    } finally {
+   245→      setPortfolioLoading(false);
+   246→    }
+   247→  }, []);
+   248→
+   249→  useEffect(() => {
+   250→    if (activeTab === 'portfolio') fetchPortfolio();
+   251→  }, [activeTab, fetchPortfolio]);
+   252→
+   253→  const openSellModal = (holding) => {
+   254→    setSellModal({ open: true, holding });
+   255→    setSellQuantity('');
+   256→  };
+   257→
+   258→  const closeSellModal = () => {
+   259→    setSellModal({ open: false, holding: null });
+   260→    setSellQuantity('');
+   261→  };
+   262→
+   263→  const handleSell = async () => {
+   264→    const qty = parseInt(sellQuantity, 10);
+   265→    if (!qty || qty <= 0) {
+   266→      toast.error('Please enter a valid quantity');
+   267→      return;
+   268→    }
+   269→    const maxQty = sellModal.holding.quantity;
+   270→    if (qty > maxQty) {
+   271→      toast.error(`Maximum sellable quantity is ${maxQty}`);
+   272→      return;
+   273→    }
+   274→    setSelling(true);
+   275→    try {
+   276→      await investmentService.sellStock({
+   277→        holding_id: sellModal.holding.id,
+   278→        symbol: sellModal.holding.symbol,
+   279→        quantity: qty,
+   280→      });
+   281→      toast.success(`Successfully sold ${qty} share${qty > 1 ? 's' : ''} of ${sellModal.holding.symbol}`);
+   282→      closeSellModal();
+   283→      fetchPortfolio();
+   284→      fetchInvestmentAccount();
+   285→      fetchInvestmentTransactions();
+   286→    } catch (err) {
+   287→      toast.error(err?.response?.data?.detail || 'Sell failed');
+   288→    } finally {
+   289→      setSelling(false);
+   290→    }
+   291→  };
+   292→
+   293→  // ── Investment Account Tab ──────────────────────────────────
+   294→  const fetchInvestmentAccount = useCallback(async () => {
+   295→    setAccountLoading(true);
+   296→    setAccountError('');
+   297→    try {
+   298→      const data = await investmentService.getInvestmentAccount();
+   299→      setInvestmentAccount(data);
+   300→    } catch (err) {
+   301→      const msg = err?.response?.data?.detail || 'Failed to load investment account';
+   302→      setAccountError(msg);
+   303→      toast.error(msg);
+   304→    } finally {
+   305→      setAccountLoading(false);
+   306→    }
+   307→  }, []);
+   308→
+   309→  const fetchInvestmentTransactions = useCallback(async () => {
+   310→    setTransactionsLoading(true);
+   311→    try {
+   312→      const data = await investmentService.getHistory();
+   313→      setInvestmentTransactions(Array.isArray(data) ? data : data?.results || data?.transactions || []);
+   314→    } catch (err) {
+   315→      toast.error(err?.response?.data?.detail || 'Failed to load investment transactions');
+   316→    } finally {
+   317→      setTransactionsLoading(false);
+   318→    }
+   319→  }, []);
+   320→
+   321→  useEffect(() => {
+   322→    if (activeTab === 'account') {
+   323→      fetchInvestmentAccount();
+   324→      fetchInvestmentTransactions();
+   325→    }
+   326→  }, [activeTab, fetchInvestmentAccount, fetchInvestmentTransactions]);
+   327→
+   328→  const openDepositModal = () => {
+   329→    setDepositModal(true);
+   330→    setDepositAmount('');
+   331→    setDepositAccountId(bankAccounts[0]?.id || '');
+   332→  };
+   333→
+   334→  const closeDepositModal = () => {
+   335→    setDepositModal(false);
+   336→    setDepositAmount('');
+   337→    setDepositAccountId('');
+   338→  };
+   339→
+   340→  const handleDeposit = async () => {
+   341→    const amount = parseFloat(depositAmount);
+   342→    if (!amount || amount <= 0) {
+   343→      toast.error('Please enter a valid amount');
+   344→      return;
+   345→    }
+   346→    if (!depositAccountId) {
+   347→      toast.error('Please select a bank account');
+   348→      return;
+   349→    }
+   350→    setDepositing(true);
+   351→    try {
+   352→      await investmentService.depositToInvestment({
+   353→        account_id: depositAccountId,
+   354→        amount,
+   355→      });
+   356→      toast.success('Deposit successful');
+   357→      closeDepositModal();
+   358→      fetchInvestmentAccount();
+   359→      fetchInvestmentTransactions();
+   360→    } catch (err) {
+   361→      toast.error(err?.response?.data?.detail || 'Deposit failed');
+   362→    } finally {
+   363→      setDepositing(false);
+   364→    }
+   365→  };
+   366→
+   367→  // ── Computed values ─────────────────────────────────────────
+   368→  const buyTotal = buyModal.stock
+   369→    ? (parseFloat(buyQuantity) || 0) * (buyModal.stock.price || buyModal.stock.current_price || 0)
+   370→    : 0;
+   371→
+   372→  const sellTotal = sellModal.holding
+   373→    ? (parseFloat(sellQuantity) || 0) * (sellModal.holding.current_price || sellModal.holding.price || 0)
+   374→    : 0;
+   375→
+   376→  const pnlPercent = portfolioSummary.total_invested > 0
+   377→    ? ((portfolioSummary.total_pnl / portfolioSummary.total_invested) * 100)
+   378→    : 0;
+   379→
+   380→  // Track API errors for display
+   381→  const [marketError, setMarketError] = useState('');
+   382→  const [portfolioError, setPortfolioError] = useState('');
+   383→  const [accountError, setAccountError] = useState('');
+   384→
+   385→  return (
+   386→    <>
+   387→      <Navbar />
+   388→      <style>{`
+   389→        @keyframes cp-inv-spin {
+   390→          to { transform: rotate(360deg); }
+   391→        }
+   392→      `}</style>
+   393→      <div style={styles.page}>
+   394→        <div style={styles.container}>
+   395→          {/* Page Header */}
+   396→          <div className="cp-page-header" style={styles.pageHeader}>
+   397→            <h1 className="cp-page-title" style={styles.pageTitle}>Investments</h1>
+   398→          </div>
+   399→
+   400→          {/* Tabs */}
+   401→          <div className="cp-tab-bar" style={styles.tabBar}>
+   402→            {TABS.map((tab) => (
+   403→              <button
+   404→                key={tab.key}
+   405→                onClick={() => setActiveTab(tab.key)}
+   406→                style={{
+   407→                  ...styles.tab,
+   408→                  ...(activeTab === tab.key ? styles.tabActive : {}),
+   409→                }}
+   410→              >
+   411→                {tab.label}
+   412→              </button>
+   413→            ))}
+   414→          </div>
+   415→
+   416→          {/* ─── MARKET TAB ─── */}
+   417→          {activeTab === 'market' && (
+   418→            <div>
+   419→              {/* Search */}
+   420→              <div style={styles.searchWrapper}>
+   421→                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+   422→                  <circle cx="11" cy="11" r="8" />
+   423→                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+   424→                </svg>
+   425→                <input
+   426→                  type="text"
+   427→                  placeholder="Search by symbol or name..."
+   428→                  value={marketSearch}
+   429→                  onChange={(e) => setMarketSearch(e.target.value)}
+   430→                  style={styles.searchInput}
+   431→                />
+   432→                {marketSearch && (
+   433→                  <button onClick={() => setMarketSearch('')} style={styles.searchClear}>&times;</button>
+   434→                )}
+   435→              </div>
+   436→
+   437→              {/* Stock Grid */}
+   438→              {marketLoading ? (
+   439→                <div style={styles.loadingContainer}>
+   440→                  <div style={styles.spinner} />
+   441→                  <span style={styles.loadingText}>Loading market data...</span>
+   442→                </div>
+   443→              ) : marketError ? (
+   444→                <div style={styles.emptyState}>
+   445→                  <div style={styles.emptyIcon}>⚠️</div>
+   446→                  <h3 style={styles.emptyTitle}>Error Loading Market</h3>
+   447→                  <p style={styles.emptyDescription}>{marketError}</p>
+   448→                  <button onClick={fetchStocks} style={styles.retryBtn}>Retry</button>
+   449→                </div>
+   450→              ) : filteredStocks.length === 0 ? (
+   451→                <div style={styles.emptyState}>
+   452→                  <div style={styles.emptyIcon}>📈</div>
+   453→                  <h3 style={styles.emptyTitle}>No Stocks Found</h3>
+   454→                  <p style={styles.emptyDescription}>
+   455→                    {marketSearch ? 'Try adjusting your search terms.' : 'No market data available at this time.'}
+   456→                  </p>
+   457→                </div>
+   458→              ) : (
+   459→                <div style={styles.stockGrid}>
+   460→                  {filteredStocks.map((stock) => {
+   461→                    const change = stock.change_percent ?? stock.change ?? 0;
+   462→                    const isPositive = change >= 0;
+   463→                    const price = stock.price || stock.current_price || 0;
+   464→                    return (
+   465→                      <div key={stock.id || stock.symbol} style={styles.stockCard}>
+   466→                        <div style={styles.stockCardHeader}>
+   467→                          <span style={styles.stockSymbol}>{stock.symbol}</span>
+   468→                          <span style={{
+   469→                            ...styles.changeBadge,
+   470→                            backgroundColor: isPositive ? '#ecfdf5' : '#fef2f2',
+   471→                            color: isPositive ? '#059669' : '#dc2626',
+   472→                          }}>
+   473→                            {isPositive ? '+' : ''}{change.toFixed(2)}%
+   474→                          </span>
+   475→                        </div>
+   476→                        <div style={styles.stockName}>{stock.name}</div>
+   477→                        <div style={styles.stockPrice}>{formatCurrency(price)}</div>
+   478→                        <div style={styles.stockMeta}>
+   479→                          <div style={styles.metaItem}>
+   480→                            <span style={styles.metaLabel}>Mkt Cap</span>
+   481→                            <span style={styles.metaValue}>{formatNumber(stock.market_cap)}</span>
+   482→                          </div>
+   483→                          <div style={styles.metaItem}>
+   484→                            <span style={styles.metaLabel}>Vol</span>
+   485→                            <span style={styles.metaValue}>{formatNumber(stock.volume)}</span>
+   486→                          </div>
+   487→                        </div>
+   488→                        <button
+   489→                          onClick={() => openBuyModal(stock)}
+   490→                          style={styles.buyBtn}
+   491→                        >
+   492→                          Buy
+   493→                        </button>
+   494→                      </div>
+   495→                    );
+   496→                  })}
+   497→                </div>
+   498→              )}
+   499→            </div>
+   500→          )}
+   501→
+   502→          {/* ─── PORTFOLIO TAB ─── */}
+   503→          {activeTab === 'portfolio' && (
+   504→            <div>
+   505→              {portfolioLoading ? (
+   506→                <div style={styles.loadingContainer}>
+   507→                  <div style={styles.spinner} />
+   508→                  <span style={styles.loadingText}>Loading portfolio...</span>
+   509→                </div>
+   510→              ) : portfolioError ? (
+   511→                <div style={styles.emptyState}>
+   512→                  <div style={styles.emptyIcon}>⚠️</div>
+   513→                  <h3 style={styles.emptyTitle}>Error Loading Portfolio</h3>
+   514→                  <p style={styles.emptyDescription}>{portfolioError}</p>
+   515→                  <button onClick={fetchPortfolio} style={styles.retryBtn}>Retry</button>
+   516→                </div>
+   517→              ) : (
+   518→                <>
+   519→                  {/* Summary Cards */}
+   520→                  <div style={styles.summaryGrid}>
+   521→                    <div style={styles.summaryCard}>
+   522→                      <span style={styles.summaryLabel}>Total Invested</span>
+   523→                      <span style={styles.summaryValue}>{formatCurrency(portfolioSummary.total_invested)}</span>
+   524→                    </div>
+   525→                    <div style={styles.summaryCard}>
+   526→                      <span style={styles.summaryLabel}>Current Value</span>
+   527→                      <span style={styles.summaryValue}>{formatCurrency(portfolioSummary.current_value)}</span>
+   528→                    </div>
+   529→                    <div style={styles.summaryCard}>
+   530→                      <span style={styles.summaryLabel}>Total P&L</span>
+   531→                      <span style={{
+   532→                        ...styles.summaryValue,
+   533→                        color: portfolioSummary.total_pnl >= 0 ? '#059669' : '#dc2626',
+   534→                      }}>
+   535→                        {portfolioSummary.total_pnl >= 0 ? '+' : ''}{formatCurrency(portfolioSummary.total_pnl)}
+   536→                      </span>
+   537→                    </div>
+   538→                  </div>
+   539→
+   540→                  {/* Holdings Table */}
+   541→                  {holdings.length === 0 ? (
+   542→                    <div style={styles.emptyState}>
+   543→                      <div style={styles.emptyIcon}>📋</div>
+   544→                      <h3 style={styles.emptyTitle}>No Holdings</h3>
+   545→                      <p style={styles.emptyDescription}>
+   546→                        You don't have any investments yet. Visit the Market tab to buy stocks.
+   547→                      </p>
+   548→                    </div>
+   549→                  ) : (
+   550→                    <div style={styles.tableCard}>
+   551→                      <div style={styles.tableOverflow}>
+   552→                        <table style={styles.table}>
+   553→                          <thead>
+   554→                            <tr>
+   555→                              <th style={styles.th}>Symbol</th>
+   556→                              <th style={styles.th}>Name</th>
+   557→                              <th style={{ ...styles.th, textAlign: 'right' }}>Qty</th>
+   558→                              <th style={{ ...styles.th, textAlign: 'right' }}>Avg Buy Price</th>
+   559→                              <th style={{ ...styles.th, textAlign: 'right' }}>Current Price</th>
+   560→                              <th style={{ ...styles.th, textAlign: 'right' }}>Current Value</th>
+   561→                              <th style={{ ...styles.th, textAlign: 'right' }}>P&L</th>
+   562→                              <th style={{ ...styles.th, textAlign: 'right' }}>% Change</th>
+   563→                              <th style={{ ...styles.th, textAlign: 'center' }}>Action</th>
+   564→                            </tr>
+   565→                          </thead>
+   566→                          <tbody>
+   567→                            {holdings.map((h) => {
+   568→                              const avgPrice = h.avg_buy_price || h.average_price || 0;
+   569→                              const curPrice = h.current_price || h.price || 0;
+   570→                              const qty = h.quantity || 0;
+   571→                              const currentValue = h.current_value || (curPrice * qty);
+   572→                              const pnl = h.pnl != null ? h.pnl : (currentValue - avgPrice * qty);
+   573→                              const pctChange = avgPrice > 0 ? ((curPrice - avgPrice) / avgPrice) * 100 : 0;
+   574→                              const isPositive = pnl >= 0;
+   575→                              return (
+   576→                                <tr key={h.id || h.symbol} style={styles.tr}>
+   577→                                  <td style={styles.td}>
+   578→                                    <span style={{ fontWeight: 700, color: '#111827' }}>{h.symbol}</span>
+   579→                                  </td>
+   580→                                  <td style={styles.td}>{h.name}</td>
+   581→                                  <td style={{ ...styles.td, textAlign: 'right', fontFamily: 'monospace' }}>{qty}</td>
+   582→                                  <td style={{ ...styles.td, textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(avgPrice)}</td>
+   583→                                  <td style={{ ...styles.td, textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(curPrice)}</td>
+   584→                                  <td style={{ ...styles.td, textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>{formatCurrency(currentValue)}</td>
+   585→                                  <td style={{
+   586→                                    ...styles.td,
+   587→                                    textAlign: 'right',
+   588→                                    fontFamily: 'monospace',
+   589→                                    fontWeight: 600,
+   590→                                    color: isPositive ? '#059669' : '#dc2626',
+   591→                                  }}>
+   592→                                    {isPositive ? '+' : ''}{formatCurrency(pnl)}
+   593→                                  </td>
+   594→                                  <td style={{
+   595→                                    ...styles.td,
+   596→                                    textAlign: 'right',
+   597→                                    fontFamily: 'monospace',
+   598→                                    fontWeight: 600,
+   599→                                    color: isPositive ? '#059669' : '#dc2626',
+   600→                                  }}>
+   601→                                    {pctChange >= 0 ? '+' : ''}{pctChange.toFixed(2)}%
+   602→                                  </td>
+   603→                                  <td style={{ ...styles.td, textAlign: 'center' }}>
+   604→                                    <button
+   605→                                      onClick={() => openSellModal(h)}
+   606→                                      style={styles.sellBtn}
+   607→                                    >
+   608→                                      Sell
+   609→                                    </button>
+   610→                                  </td>
+   611→                                </tr>
+   612→                              );
+   613→                            })}
+   614→                          </tbody>
+   615→                        </table>
+   616→                      </div>
+   617→                    </div>
+   618→                  )}
+   619→                </>
+   620→              )}
+   621→            </div>
+   622→          )}
+   623→
+   624→          {/* ─── INVESTMENT ACCOUNT TAB ─── */}
+   625→          {activeTab === 'account' && (
+   626→            <div>
+   627→              {accountLoading ? (
+   628→                <div style={styles.loadingContainer}>
+   629→                  <div style={styles.spinner} />
+   630→                  <span style={styles.loadingText}>Loading account...</span>
+   631→                </div>
+   632→              ) : accountError ? (
+   633→                <div style={styles.emptyState}>
+   634→                  <div style={styles.emptyIcon}>⚠️</div>
+   635→                  <h3 style={styles.emptyTitle}>Error Loading Account</h3>
+   636→                  <p style={styles.emptyDescription}>{accountError}</p>
+   637→                  <button onClick={() => { fetchInvestmentAccount(); fetchInvestmentTransactions(); }} style={styles.retryBtn}>Retry</button>
+   638→                </div>
+   639→              ) : (
+   640→                <>
+   641→                  {/* Account Balance Card */}
+   642→                  <div style={styles.accountBalanceCard}>
+   643→                    <div style={styles.accountBalanceHeader}>
+   644→                      <div>
+   645→                        <div style={styles.accountBalanceLabel}>Investment Account Balance</div>
+   646→                        <div style={styles.accountBalanceValue}>
+   647→                          {formatCurrency(investmentAccount?.balance || investmentAccount?.available_balance || 0)}
+   648→                        </div>
+   649→                      </div>
+   650→                      <button onClick={openDepositModal} style={styles.depositBtn}>
+   651→                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '6px' }}>
+   652→                          <line x1="12" y1="5" x2="12" y2="19" />
+   653→                          <line x1="5" y1="12" x2="19" y2="12" />
+   654→                        </svg>
+   655→                        Deposit from Bank
+   656→                      </button>
+   657→                    </div>
+   658→                    {investmentAccount && (
+   659→                      <div style={styles.accountMetaRow}>
+   660→                        <span style={styles.accountMetaItem}>
+   661→                          Account #: {investmentAccount.account_number || '—'}
+   662→                        </span>
+   663→                        <span style={styles.accountMetaItem}>
+   664→                          Status: <span style={{ color: '#059669', fontWeight: 600 }}>{investmentAccount.status || 'Active'}</span>
+   665→                        </span>
+   666→                      </div>
+   667→                    )}
+   668→                  </div>
+   669→
+   670→                  {/* Transaction History */}
+   671→                  <div style={styles.sectionHeader}>
+   672→                    <h2 style={styles.sectionTitle}>Transaction History</h2>
+   673→                  </div>
+   674→
+   675→                  {transactionsLoading ? (
+   676→                    <div style={styles.loadingContainer}>
+   677→                      <div style={styles.spinner} />
+   678→                      <span style={styles.loadingText}>Loading transactions...</span>
+   679→                    </div>
+   680→                  ) : investmentTransactions.length === 0 ? (
+   681→                    <div style={styles.emptyState}>
+   682→                      <div style={styles.emptyIcon}>📜</div>
+   683→                      <h3 style={styles.emptyTitle}>No Transactions</h3>
+   684→                      <p style={styles.emptyDescription}>
+   685→                        Your investment transaction history will appear here.
+   686→                      </p>
+   687→                    </div>
+   688→                  ) : (
+   689→                    <div style={styles.tableCard}>
+   690→                      <div style={styles.tableOverflow}>
+   691→                        <table style={styles.table}>
+   692→                          <thead>
+   693→                            <tr>
+   694→                              <th style={styles.th}>Date</th>
+   695→                              <th style={styles.th}>Type</th>
+   696→                              <th style={styles.th}>Symbol</th>
+   697→                              <th style={{ ...styles.th, textAlign: 'right' }}>Quantity</th>
+   698→                              <th style={{ ...styles.th, textAlign: 'right' }}>Price</th>
+   699→                              <th style={{ ...styles.th, textAlign: 'right' }}>Amount</th>
+   700→                              <th style={{ ...styles.th, textAlign: 'center' }}>Status</th>
+   701→                            </tr>
+   702→                          </thead>
+   703→                          <tbody>
+   704→                            {investmentTransactions.map((tx, idx) => {
+   705→                              const type = (tx.type || tx.transaction_type || '').toLowerCase();
+   706→                              const status = (tx.status || '').toLowerCase();
+   707→                              return (
+   708→                                <tr key={tx.id || idx} style={styles.tr}>
+   709→                                  <td style={styles.td}>{formatDate(tx.date || tx.created_at)}</td>
+   710→                                  <td style={styles.td}>
+   711→                                    <span style={{
+   712→                                      ...styles.typeBadge,
+   713→                                      backgroundColor: type === 'buy' ? '#eff6ff' : type === 'sell' ? '#fef2f2' : '#ecfdf5',
+   714→                                      color: type === 'buy' ? '#1a56db' : type === 'sell' ? '#dc2626' : '#059669',
+   715→                                    }}>
+   716→                                      {type.charAt(0).toUpperCase() + type.slice(1)}
+   717→                                    </span>
+   718→                                  </td>
+   719→                                  <td style={styles.td}>
+   720→                                    <span style={{ fontWeight: 600 }}>{tx.symbol || '—'}</span>
+   721→                                  </td>
+   722→                                  <td style={{ ...styles.td, textAlign: 'right', fontFamily: 'monospace' }}>
+   723→                                    {tx.quantity || '—'}
+   724→                                  </td>
+   725→                                  <td style={{ ...styles.td, textAlign: 'right', fontFamily: 'monospace' }}>
+   726→                                    {tx.price != null ? formatCurrency(tx.price) : '—'}
+   727→                                  </td>
+   728→                                  <td style={{ ...styles.td, textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>
+   729→                                    {formatCurrency(tx.amount || 0)}
+   730→                                  </td>
+   731→                                  <td style={{ ...styles.td, textAlign: 'center' }}>
+   732→                                    <span style={{
+   733→                                      ...styles.statusBadge,
+   734→                                      backgroundColor: status === 'completed' ? '#ecfdf5' : status === 'pending' ? '#fffbeb' : '#f9fafb',
+   735→                                      color: status === 'completed' ? '#059669' : status === 'pending' ? '#d97706' : '#6b7280',
+   736→                                    }}>
+   737→                                      {status.charAt(0).toUpperCase() + status.slice(1)}
+   738→                                    </span>
+   739→                                  </td>
+   740→                                </tr>
+   741→                              );
+   742→                            })}
+   743→                          </tbody>
+   744→                        </table>
+   745→                      </div>
+   746→                    </div>
+   747→                  )}
+   748→                </>
+   749→              )}
+   750→            </div>
+   751→          )}
+   752→        </div>
+   753→      </div>
+   754→
+   755→      {/* ─── BUY MODAL ─── */}
+   756→      {buyModal.open && buyModal.stock && (
+   757→        <div style={styles.modalOverlay} onClick={closeBuyModal}>
+   758→          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+   759→            <div style={styles.modalHeader}>
+   760→              <h2 style={styles.modalTitle}>Buy Stock</h2>
+   761→              <button onClick={closeBuyModal} style={styles.modalClose}>&times;</button>
+   762→            </div>
+   763→            <div style={styles.modalBody}>
+   764→              {/* Stock Info */}
+   765→              <div style={styles.modalStockInfo}>
+   766→                <div>
+   767→                  <span style={styles.modalStockSymbol}>{buyModal.stock.symbol}</span>
+   768→                  <span style={styles.modalStockName}>{buyModal.stock.name}</span>
+   769→                </div>
+   770→                <div style={styles.modalStockPrice}>
+   771→                  {formatCurrency(buyModal.stock.price || buyModal.stock.current_price || 0)}
+   772→                </div>
+   773→              </div>
+   774→
+   775→              {/* Quantity Input */}
+   776→              <div style={styles.formGroup}>
+   777→                <label style={styles.formLabel}>Quantity</label>
+   778→                <input
+   779→                  type="number"
+   780→                  min="1"
+   781→                  value={buyQuantity}
+   782→                  onChange={(e) => setBuyQuantity(e.target.value)}
+   783→                  placeholder="Enter number of shares"
+   784→                  style={styles.formInput}
+   785→                />
+   786→              </div>
+   787→
+   788→              {/* Account Selector */}
+   789→              <div style={styles.formGroup}>
+   790→                <label style={styles.formLabel}>Pay From Account</label>
+   791→                <select
+   792→                  value={buyAccountId}
+   793→                  onChange={(e) => setBuyAccountId(e.target.value)}
+   794→                  style={styles.formSelect}
+   795→                >
+   796→                  <option value="">Select bank account</option>
+   797→                  {bankAccounts.map((acc) => (
+   798→                    <option key={acc.id || acc.account_number} value={acc.id || acc.account_number}>
+   799→                      {acc.account_type || 'Account'} — {acc.account_number} ({formatCurrency(acc.balance)})
+   800→                    </option>
+   801→                  ))}
+   802→                </select>
+   803→              </div>
+   804→
+   805→              {/* Total Cost */}
+   806→              <div style={styles.modalTotal}>
+   807→                <span style={styles.modalTotalLabel}>Estimated Total</span>
+   808→                <span style={styles.modalTotalValue}>{formatCurrency(buyTotal)}</span>
+   809→              </div>
+   810→            </div>
+   811→
+   812→            <div style={styles.modalFooter}>
+   813→              <button onClick={closeBuyModal} style={styles.btnSecondary}>Cancel</button>
+   814→              <button
+   815→                onClick={handleBuy}
+   816→                disabled={buying || !buyQuantity || !buyAccountId}
+   817→                style={{
+   818→                  ...styles.btnPrimary,
+   819→                  opacity: (buying || !buyQuantity || !buyAccountId) ? 0.5 : 1,
+   820→                  cursor: (buying || !buyQuantity || !buyAccountId) ? 'not-allowed' : 'pointer',
+   821→                }}
+   822→              >
+   823→                {buying ? 'Processing...' : 'Confirm Purchase'}
+   824→              </button>
+   825→            </div>
+   826→          </div>
+   827→        </div>
+   828→      )}
+   829→
+   830→      {/* ─── SELL MODAL ─── */}
+   831→      {sellModal.open && sellModal.holding && (
+   832→        <div style={styles.modalOverlay} onClick={closeSellModal}>
+   833→          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+   834→            <div style={styles.modalHeader}>
+   835→              <h2 style={styles.modalTitle}>Sell Stock</h2>
+   836→              <button onClick={closeSellModal} style={styles.modalClose}>&times;</button>
+   837→            </div>
+   838→            <div style={styles.modalBody}>
+   839→              {/* Holding Info */}
+   840→              <div style={styles.modalStockInfo}>
+   841→                <div>
+   842→                  <span style={styles.modalStockSymbol}>{sellModal.holding.symbol}</span>
+   843→                  <span style={styles.modalStockName}>{sellModal.holding.name}</span>
+   844→                </div>
+   845→                <div style={styles.modalStockPrice}>
+   846→                  {formatCurrency(sellModal.holding.current_price || sellModal.holding.price || 0)}
+   847→                </div>
+   848→              </div>
+   849→
+   850→              <div style={styles.maxQtyRow}>
+   851→                <span style={styles.maxQtyLabel}>Shares owned:</span>
+   852→                <span style={styles.maxQtyValue}>{sellModal.holding.quantity}</span>
+   853→              </div>
+   854→
+   855→              {/* Quantity Input */}
+   856→              <div style={styles.formGroup}>
+   857→                <label style={styles.formLabel}>Quantity to Sell</label>
+   858→                <input
+   859→                  type="number"
+   860→                  min="1"
+   861→                  max={sellModal.holding.quantity}
+   862→                  value={sellQuantity}
+   863→                  onChange={(e) => setSellQuantity(e.target.value)}
+   864→                  placeholder={`Max: ${sellModal.holding.quantity}`}
+   865→                  style={styles.formInput}
+   866→                />
+   867→              </div>
+   868→
+   869→              {/* Total Proceeds */}
+   870→              <div style={styles.modalTotal}>
+   871→                <span style={styles.modalTotalLabel}>Estimated Proceeds</span>
+   872→                <span style={styles.modalTotalValue}>{formatCurrency(sellTotal)}</span>
+   873→              </div>
+   874→            </div>
+   875→
+   876→            <div style={styles.modalFooter}>
+   877→              <button onClick={closeSellModal} style={styles.btnSecondary}>Cancel</button>
+   878→              <button
+   879→                onClick={handleSell}
+   880→                disabled={selling || !sellQuantity}
+   881→                style={{
+   882→                  ...styles.btnSell,
+   883→                  opacity: (selling || !sellQuantity) ? 0.5 : 1,
+   884→                  cursor: (selling || !sellQuantity) ? 'not-allowed' : 'pointer',
+   885→                }}
+   886→              >
+   887→                {selling ? 'Processing...' : 'Confirm Sale'}
+   888→              </button>
+   889→            </div>
+   890→          </div>
+   891→        </div>
+   892→      )}
+   893→
+   894→      {/* ─── DEPOSIT MODAL ─── */}
+   895→      {depositModal && (
+   896→        <div style={styles.modalOverlay} onClick={closeDepositModal}>
+   897→          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+   898→            <div style={styles.modalHeader}>
+   899→              <h2 style={styles.modalTitle}>Deposit to Investment Account</h2>
+   900→              <button onClick={closeDepositModal} style={styles.modalClose}>&times;</button>
+   901→            </div>
+   902→            <div style={styles.modalBody}>
+   903→              {/* Account Selector */}
+   904→              <div style={styles.formGroup}>
+   905→                <label style={styles.formLabel}>From Bank Account</label>
+   906→                <select
+   907→                  value={depositAccountId}
+   908→                  onChange={(e) => setDepositAccountId(e.target.value)}
+   909→                  style={styles.formSelect}
+   910→                >
+   911→                  <option value="">Select bank account</option>
+   912→                  {bankAccounts.map((acc) => (
+   913→                    <option key={acc.id || acc.account_number} value={acc.id || acc.account_number}>
+   914→                      {acc.account_type || 'Account'} — {acc.account_number} ({formatCurrency(acc.balance)})
+   915→                    </option>
+   916→                  ))}
+   917→                </select>
+   918→              </div>
+   919→
+   920→              {/* Amount Input */}
+   921→              <div style={styles.formGroup}>
+   922→                <label style={styles.formLabel}>Amount</label>
+   923→                <input
+   924→                  type="number"
+   925→                  min="0.01"
+   926→                  step="0.01"
+   927→                  value={depositAmount}
+   928→                  onChange={(e) => setDepositAmount(e.target.value)}
+   929→                  placeholder="Enter amount"
+   930→                  style={styles.formInput}
+   931→                />
+   932→              </div>
+   933→            </div>
+   934→
+   935→            <div style={styles.modalFooter}>
+   936→              <button onClick={closeDepositModal} style={styles.btnSecondary}>Cancel</button>
+   937→              <button
+   938→                onClick={handleDeposit}
+   939→                disabled={depositing || !depositAmount || !depositAccountId}
+   940→                style={{
+   941→                  ...styles.btnPrimary,
+   942→                  opacity: (depositing || !depositAmount || !depositAccountId) ? 0.5 : 1,
+   943→                  cursor: (depositing || !depositAmount || !depositAccountId) ? 'not-allowed' : 'pointer',
+   944→                }}
+   945→              >
+   946→                {depositing ? 'Processing...' : 'Confirm Deposit'}
+   947→              </button>
+   948→            </div>
+   949→          </div>
+   950→        </div>
+   951→      )}
+   952→    </>
+   953→  );
+   954→}
+   955→
+   956→export default function InvestmentsPageWithErrorBoundary() {
+   957→  return (
+   958→    <InvestmentErrorBoundary>
+   959→      <InvestmentsPage />
+   960→    </InvestmentErrorBoundary>
+   961→  );
+   962→}
+   963→
+   964→const styles = {
+   965→  // Page
+   966→  page: {
+   967→    paddingTop: '64px',
+   968→    minHeight: '100vh',
+   969→    backgroundColor: '#f9fafb',
+   970→    fontFamily: 'Inter, -apple-system, sans-serif',
+   971→  },
+   972→  container: {
+   973→    maxWidth: '1200px',
+   974→    margin: '0 auto',
+   975→    padding: '32px 24px',
+   976→  },
+   977→
+   978→  // Header
+   979→  pageHeader: {
+   980→    marginBottom: '24px',
+   981→  },
+   982→  pageTitle: {
+   983→    fontSize: '24px',
+   984→    fontWeight: 700,
+   985→    color: '#111827',
+   986→    margin: 0,
+   987→  },
+   988→
+   989→  // Tabs
+   990→  tabBar: {
+   991→    display: 'flex',
+   992→    gap: '4px',
+   993→    borderBottom: '1px solid #e5e7eb',
+   994→    marginBottom: '24px',
+   995→  },
+   996→  tab: {
+   997→    padding: '10px 20px',
+   998→    fontSize: '14px',
+   999→    fontWeight: 500,
+  1000→    color: '#6b7280',
+  1001→    backgroundColor: 'transparent',
+  1002→    border: 'none',
+  1003→    borderBottom: '2px solid transparent',
+  1004→    cursor: 'pointer',
+  1005→    fontFamily: 'Inter, -apple-system, sans-serif',
+  1006→    transition: 'color 0.15s, border-color 0.15s',
+  1007→    marginBottom: '-1px',
+  1008→  },
+  1009→  tabActive: {
+  1010→    color: '#1a56db',
+  1011→    borderBottomColor: '#1a56db',
+  1012→    fontWeight: 600,
+  1013→  },
+  1014→
+  1015→  // Search
+  1016→  searchWrapper: {
+  1017→    display: 'flex',
+  1018→    alignItems: 'center',
+  1019→    gap: '10px',
+  1020→    backgroundColor: '#ffffff',
+  1021→    border: '1px solid #e5e7eb',
+  1022→    borderRadius: '12px',
+  1023→    padding: '0 16px',
+  1024→    marginBottom: '24px',
+  1025→    boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+  1026→  },
+  1027→  searchInput: {
+  1028→    flex: 1,
+  1029→    padding: '12px 0',
+  1030→    fontSize: '14px',
+  1031→    color: '#111827',
+  1032→    backgroundColor: 'transparent',
+  1033→    border: 'none',
+  1034→    outline: 'none',
+  1035→    fontFamily: 'Inter, -apple-system, sans-serif',
+  1036→  },
+  1037→  searchClear: {
+  1038→    background: 'none',
+  1039→    border: 'none',
+  1040→    fontSize: '18px',
+  1041→    color: '#9ca3af',
+  1042→    cursor: 'pointer',
+  1043→    padding: '0',
+  1044→    lineHeight: 1,
+  1045→  },
+  1046→
+  1047→  // Stock Grid
+  1048→  stockGrid: {
+  1049→    display: 'grid',
+  1050→    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+  1051→    gap: '16px',
+  1052→  },
+  1053→  stockCard: {
+  1054→    backgroundColor: '#ffffff',
+  1055→    borderRadius: '12px',
+  1056→    border: '1px solid #e5e7eb',
+  1057→    padding: '20px',
+  1058→    display: 'flex',
+  1059→    flexDirection: 'column',
+  1060→    gap: '8px',
+  1061→    boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+  1062→    transition: 'box-shadow 0.15s',
+  1063→  },
+  1064→  stockCardHeader: {
+  1065→    display: 'flex',
+  1066→    justifyContent: 'space-between',
+  1067→    alignItems: 'center',
+  1068→  },
+  1069→  stockSymbol: {
+  1070→    fontSize: '18px',
+  1071→    fontWeight: 700,
+  1072→    color: '#111827',
+  1073→  },
+  1074→  stockName: {
+  1075→    fontSize: '13px',
+  1076→    color: '#6b7280',
+  1077→  },
+  1078→  stockPrice: {
+  1079→    fontSize: '22px',
+  1080→    fontWeight: 700,
+  1081→    color: '#111827',
+  1082→  },
+  1083→  stockMeta: {
+  1084→    display: 'flex',
+  1085→    gap: '16px',
+  1086→    marginTop: '4px',
+  1087→  },
+  1088→  metaItem: {
+  1089→    display: 'flex',
+  1090→    flexDirection: 'column',
+  1091→    gap: '2px',
+  1092→  },
+  1093→  metaLabel: {
+  1094→    fontSize: '11px',
+  1095→    color: '#9ca3af',
+  1096→    fontWeight: 500,
+  1097→    textTransform: 'uppercase',
+  1098→    letterSpacing: '0.3px',
+  1099→  },
+  1100→  metaValue: {
+  1101→    fontSize: '13px',
+  1102→    fontWeight: 600,
+  1103→    color: '#374151',
+  1104→  },
+  1105→  changeBadge: {
+  1106→    fontSize: '12px',
+  1107→    fontWeight: 600,
+  1108→    padding: '3px 8px',
+  1109→    borderRadius: '6px',
+  1110→  },
+  1111→  buyBtn: {
+  1112→    marginTop: '8px',
+  1113→    width: '100%',
+  1114→    padding: '10px',
+  1115→    fontSize: '14px',
+  1116→    fontWeight: 600,
+  1117→    color: '#ffffff',
+  1118→    backgroundColor: '#1a56db',
+  1119→    border: 'none',
+  1120→    borderRadius: '8px',
+  1121→    cursor: 'pointer',
+  1122→    fontFamily: 'Inter, -apple-system, sans-serif',
+  1123→    transition: 'background-color 0.15s',
+  1124→  },
+  1125→
+  1126→  // Summary Cards
+  1127→  summaryGrid: {
+  1128→    display: 'grid',
+  1129→    gridTemplateColumns: 'repeat(3, 1fr)',
+  1130→    gap: '16px',
+  1131→    marginBottom: '24px',
+  1132→  },
+  1133→  summaryCard: {
+  1134→    backgroundColor: '#ffffff',
+  1135→    borderRadius: '12px',
+  1136→    border: '1px solid #e5e7eb',
+  1137→    padding: '20px',
+  1138→    display: 'flex',
+  1139→    flexDirection: 'column',
+  1140→    gap: '8px',
+  1141→    boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+  1142→  },
+  1143→  summaryLabel: {
+  1144→    fontSize: '13px',
+  1145→    fontWeight: 500,
+  1146→    color: '#6b7280',
+  1147→  },
+  1148→  summaryValue: {
+  1149→    fontSize: '28px',
+  1150→    fontWeight: 700,
+  1151→    color: '#111827',
+  1152→  },
+  1153→
+  1154→  // Table
+  1155→  tableCard: {
+  1156→    backgroundColor: '#ffffff',
+  1157→    borderRadius: '12px',
+  1158→    border: '1px solid #e5e7eb',
+  1159→    boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+  1160→  },
+  1161→  tableOverflow: {
+  1162→    overflowX: 'auto',
+  1163→  },
+  1164→  table: {
+  1165→    width: '100%',
+  1166→    borderCollapse: 'collapse',
+  1167→    fontSize: '14px',
+  1168→  },
+  1169→  th: {
+  1170→    padding: '12px 16px',
+  1171→    fontSize: '12px',
+  1172→    fontWeight: 600,
+  1173→    color: '#6b7280',
+  1174→    textTransform: 'uppercase',
+  1175→    letterSpacing: '0.5px',
+  1176→    textAlign: 'left',
+  1177→    borderBottom: '1px solid #e5e7eb',
+  1178→    backgroundColor: '#f9fafb',
+  1179→    whiteSpace: 'nowrap',
+  1180→  },
+  1181→  tr: {
+  1182→    borderBottom: '1px solid #f3f4f6',
+  1183→    transition: 'background-color 0.1s',
+  1184→  },
+  1185→  td: {
+  1186→    padding: '12px 16px',
+  1187→    color: '#374151',
+  1188→    whiteSpace: 'nowrap',
+  1189→  },
+  1190→  sellBtn: {
+  1191→    padding: '6px 16px',
+  1192→    fontSize: '13px',
+  1193→    fontWeight: 600,
+  1194→    color: '#dc2626',
+  1195→    backgroundColor: '#fef2f2',
+  1196→    border: '1px solid #fecaca',
+  1197→    borderRadius: '6px',
+  1198→    cursor: 'pointer',
+  1199→    fontFamily: 'Inter, -apple-system, sans-serif',
+  1200→    transition: 'background-color 0.15s',
+  1201→  },
+  1202→
+  1203→  // Type & Status Badges
+  1204→  typeBadge: {
+  1205→    display: 'inline-block',
+  1206→    padding: '3px 10px',
+  1207→    borderRadius: '6px',
+  1208→    fontSize: '12px',
+  1209→    fontWeight: 600,
+  1210→    textTransform: 'capitalize',
+  1211→  },
+  1212→  statusBadge: {
+  1213→    display: 'inline-block',
+  1214→    padding: '3px 10px',
+  1215→    borderRadius: '6px',
+  1216→    fontSize: '12px',
+  1217→    fontWeight: 600,
+  1218→  },
+  1219→
+  1220→  // Section Header
+  1221→  sectionHeader: {
+  1222→    marginBottom: '16px',
+  1223→  },
+  1224→  sectionTitle: {
+  1225→    fontSize: '18px',
+  1226→    fontWeight: 600,
+  1227→    color: '#111827',
+  1228→    margin: 0,
+  1229→  },
+  1230→
+  1231→  // Account Balance Card
+  1232→  accountBalanceCard: {
+  1233→    backgroundColor: '#ffffff',
+  1234→    borderRadius: '12px',
+  1235→    border: '1px solid #e5e7eb',
+  1236→    padding: '28px',
+  1237→    marginBottom: '32px',
+  1238→    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+  1239→  },
+  1240→  accountBalanceHeader: {
+  1241→    display: 'flex',
+  1242→    justifyContent: 'space-between',
+  1243→    alignItems: 'center',
+  1244→    marginBottom: '16px',
+  1245→    flexWrap: 'wrap',
+  1246→    gap: '16px',
+  1247→  },
+  1248→  accountBalanceLabel: {
+  1249→    fontSize: '14px',
+  1250→    fontWeight: 500,
+  1251→    color: '#6b7280',
+  1252→    marginBottom: '4px',
+  1253→  },
+  1254→  accountBalanceValue: {
+  1255→    fontSize: '36px',
+  1256→    fontWeight: 700,
+  1257→    color: '#111827',
+  1258→  },
+  1259→  depositBtn: {
+  1260→    display: 'inline-flex',
+  1261→    alignItems: 'center',
+  1262→    padding: '10px 20px',
+  1263→    fontSize: '14px',
+  1264→    fontWeight: 600,
+  1265→    color: '#ffffff',
+  1266→    backgroundColor: '#1a56db',
+  1267→    border: 'none',
+  1268→    borderRadius: '8px',
+  1269→    cursor: 'pointer',
+  1270→    fontFamily: 'Inter, -apple-system, sans-serif',
+  1271→    transition: 'background-color 0.15s',
+  1272→  },
+  1273→  accountMetaRow: {
+  1274→    display: 'flex',
+  1275→    gap: '24px',
+  1276→    paddingTop: '16px',
+  1277→    borderTop: '1px solid #f3f4f6',
+  1278→  },
+  1279→  accountMetaItem: {
+  1280→    fontSize: '13px',
+  1281→    color: '#6b7280',
+  1282→  },
+  1283→
+  1284→  // Loading & Empty
+  1285→  loadingContainer: {
+  1286→    display: 'flex',
+  1287→    flexDirection: 'column',
+  1288→    alignItems: 'center',
+  1289→    justifyContent: 'center',
+  1290→    padding: '64px 24px',
+  1291→    gap: '12px',
+  1292→  },
+  1293→  spinner: {
+  1294→    width: '32px',
+  1295→    height: '32px',
+  1296→    border: '3px solid #e5e7eb',
+  1297→    borderTopColor: '#1a56db',
+  1298→    borderRadius: '50%',
+  1299→    animation: 'cp-inv-spin 0.8s linear infinite',
+  1300→  },
+  1301→  loadingText: {
+  1302→    fontSize: '14px',
+  1303→    color: '#6b7280',
+  1304→  },
+  1305→  emptyState: {
+  1306→    display: 'flex',
+  1307→    flexDirection: 'column',
+  1308→    alignItems: 'center',
+  1309→    justifyContent: 'center',
+  1310→    padding: '64px 24px',
+  1311→    textAlign: 'center',
+  1312→    backgroundColor: '#ffffff',
+  1313→    borderRadius: '12px',
+  1314→    border: '1px solid #e5e7eb',
+  1315→  },
+  1316→  emptyIcon: {
+  1317→    fontSize: '48px',
+  1318→    marginBottom: '16px',
+  1319→  },
+  1320→  emptyTitle: {
+  1321→    fontSize: '18px',
+  1322→    fontWeight: 600,
+  1323→    color: '#111827',
+  1324→    margin: '0 0 8px 0',
+  1325→  },
+  1326→  emptyDescription: {
+  1327→    fontSize: '14px',
+  1328→    color: '#6b7280',
+  1329→    margin: 0,
+  1330→    marginBottom: '16px',
+  1331→  },
+  1332→  retryBtn: {
+  1333→    marginTop: '8px',
+  1334→    padding: '10px 24px',
+  1335→    fontSize: '14px',
+  1336→    fontWeight: 600,
+  1337→    color: '#ffffff',
+  1338→    backgroundColor: '#1a56db',
+  1339→    border: 'none',
+  1340→    borderRadius: '8px',
+  1341→    cursor: 'pointer',
+  1342→    fontFamily: 'Inter, -apple-system, sans-serif',
+  1343→  },
+  1344→
+  1345→  // Modal
+  1346→  modalOverlay: {
+  1347→    position: 'fixed',
+  1348→    inset: 0,
+  1349→    backgroundColor: 'rgba(0,0,0,0.5)',
+  1350→    display: 'flex',
+  1351→    alignItems: 'center',
+  1352→    justifyContent: 'center',
+  1353→    zIndex: 1000,
+  1354→    padding: '24px',
+  1355→  },
+  1356→  modal: {
+  1357→    backgroundColor: '#ffffff',
+  1358→    borderRadius: '16px',
+  1359→    width: '100%',
+  1360→    maxWidth: '480px',
+  1361→    boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+  1362→    overflow: 'hidden',
+  1363→  },
+  1364→  modalHeader: {
+  1365→    display: 'flex',
+  1366→    justifyContent: 'space-between',
+  1367→    alignItems: 'center',
+  1368→    padding: '20px 24px',
+  1369→    borderBottom: '1px solid #f3f4f6',
+  1370→  },
+  1371→  modalTitle: {
+  1372→    fontSize: '18px',
+  1373→    fontWeight: 700,
+  1374→    color: '#111827',
+  1375→    margin: 0,
+  1376→  },
+  1377→  modalClose: {
+  1378→    background: 'none',
+  1379→    border: 'none',
+  1380→    fontSize: '24px',
+  1381→    color: '#6b7280',
+  1382→    cursor: 'pointer',
+  1383→    padding: '0',
+  1384→    lineHeight: 1,
+  1385→  },
+  1386→  modalBody: {
+  1387→    padding: '24px',
+  1388→    display: 'flex',
+  1389→    flexDirection: 'column',
+  1390→    gap: '16px',
+  1391→  },
+  1392→  modalFooter: {
+  1393→    display: 'flex',
+  1394→    justifyContent: 'flex-end',
+  1395→    gap: '8px',
+  1396→    padding: '16px 24px',
+  1397→    borderTop: '1px solid #f3f4f6',
+  1398→    backgroundColor: '#f9fafb',
+  1399→  },
+  1400→
+  1401→  // Modal Stock Info
+  1402→  modalStockInfo: {
+  1403→    display: 'flex',
+  1404→    justifyContent: 'space-between',
+  1405→    alignItems: 'center',
+  1406→    padding: '16px',
+  1407→    backgroundColor: '#f9fafb',
+  1408→    borderRadius: '10px',
+  1409→  },
+  1410→  modalStockSymbol: {
+  1411→    display: 'block',
+  1412→    fontSize: '18px',
+  1413→    fontWeight: 700,
+  1414→    color: '#111827',
+  1415→    marginRight: '8px',
+  1416→  },
+  1417→  modalStockName: {
+  1418→    display: 'block',
+  1419→    fontSize: '13px',
+  1420→    color: '#6b7280',
+  1421→  },
+  1422→  modalStockPrice: {
+  1423→    fontSize: '24px',
+  1424→    fontWeight: 700,
+  1425→    color: '#111827',
+  1426→  },
+  1427→
+  1428→  // Max Quantity Row
+  1429→  maxQtyRow: {
+  1430→    display: 'flex',
+  1431→    justifyContent: 'space-between',
+  1432→    alignItems: 'center',
+  1433→    padding: '10px 14px',
+  1434→    backgroundColor: '#f9fafb',
+  1435→    borderRadius: '8px',
+  1436→  },
+  1437→  maxQtyLabel: {
+  1438→    fontSize: '13px',
+  1439→    color: '#6b7280',
+  1440→  },
+  1441→  maxQtyValue: {
+  1442→    fontSize: '14px',
+  1443→    fontWeight: 700,
+  1444→    color: '#111827',
+  1445→  },
+  1446→
+  1447→  // Modal Total
+  1448→  modalTotal: {
+  1449→    display: 'flex',
+  1450→    justifyContent: 'space-between',
+  1451→    alignItems: 'center',
+  1452→    padding: '14px 16px',
+  1453→    backgroundColor: '#f9fafb',
+  1454→    borderRadius: '10px',
+  1455→  },
+  1456→  modalTotalLabel: {
+  1457→    fontSize: '14px',
+  1458→    color: '#6b7280',
+  1459→  },
+  1460→  modalTotalValue: {
+  1461→    fontSize: '18px',
+  1462→    fontWeight: 700,
+  1463→    color: '#111827',
+  1464→  },
+  1465→
+  1466→  // Form
+  1467→  formGroup: {
+  1468→    display: 'flex',
+  1469→    flexDirection: 'column',
+  1470→    gap: '6px',
+  1471→  },
+  1472→  formLabel: {
+  1473→    fontSize: '13px',
+  1474→    fontWeight: 600,
+  1475→    color: '#374151',
+  1476→  },
+  1477→  formInput: {
+  1478→    width: '100%',
+  1479→    padding: '10px 14px',
+  1480→    fontSize: '14px',
+  1481→    color: '#111827',
+  1482→    backgroundColor: '#ffffff',
+  1483→    border: '1px solid #e5e7eb',
+  1484→    borderRadius: '8px',
+  1485→    outline: 'none',
+  1486→    fontFamily: 'Inter, -apple-system, sans-serif',
+  1487→    transition: 'border-color 0.15s',
+  1488→    boxSizing: 'border-box',
+  1489→  },
+  1490→  formSelect: {
+  1491→    width: '100%',
+  1492→    padding: '10px 14px',
+  1493→    fontSize: '14px',
+  1494→    color: '#111827',
+  1495→    backgroundColor: '#ffffff',
+  1496→    border: '1px solid #e5e7eb',
+  1497→    borderRadius: '8px',
+  1498→    outline: 'none',
+  1499→    fontFamily: 'Inter, -apple-system, sans-serif',
+  1500→    cursor: 'pointer',
+  1501→    transition: 'border-color 0.15s',
+  1502→  },
+  1503→
+  1504→  // Buttons
+  1505→  btnPrimary: {
+  1506→    padding: '10px 24px',
+  1507→    fontSize: '14px',
+  1508→    fontWeight: 600,
+  1509→    color: '#ffffff',
+  1510→    backgroundColor: '#1a56db',
+  1511→    border: 'none',
+  1512→    borderRadius: '8px',
+  1513→    cursor: 'pointer',
+  1514→    fontFamily: 'Inter, -apple-system, sans-serif',
+  1515→    transition: 'background-color 0.15s',
+  1516→  },
+  1517→  btnSecondary: {
+  1518→    padding: '10px 24px',
+  1519→    fontSize: '14px',
+  1520→    fontWeight: 600,
+  1521→    color: '#374151',
+  1522→    backgroundColor: '#ffffff',
+  1523→    border: '1px solid #e5e7eb',
+  1524→    borderRadius: '8px',
+  1525→    cursor: 'pointer',
+  1526→    fontFamily: 'Inter, -apple-system, sans-serif',
+  1527→    transition: 'background-color 0.15s',
+  1528→  },
+  1529→  btnSell: {
+  1530→    padding: '10px 24px',
+  1531→    fontSize: '14px',
+  1532→    fontWeight: 600,
+  1533→    color: '#ffffff',
+  1534→    backgroundColor: '#dc2626',
+  1535→    border: 'none',
+  1536→    borderRadius: '8px',
+  1537→    cursor: 'pointer',
+  1538→    fontFamily: 'Inter, -apple-system, sans-serif',
+  1539→    transition: 'background-color 0.15s',
+  1540→  },
+  1541→};

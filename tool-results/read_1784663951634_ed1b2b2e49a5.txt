@@ -1,0 +1,1117 @@
+     1→import React, { useState, useEffect, useCallback, useRef } from 'react';
+     2→import Navbar from '../../components/common/Navbar';
+     3→import LoadingSpinner from '../../components/common/LoadingSpinner';
+     4→import cryptoService from '../../services/cryptoService';
+     5→import toast from 'react-hot-toast';
+     6→import { formatCurrency, formatDate } from '../../utils/constants';
+     7→
+     8→const CRYPTO_RATES = {
+     9→  BTC: 67500,
+    10→  ETH: 3450,
+    11→  USDT: 1,
+    12→};
+    13→
+    14→const WALLET_ADDRESSES = [
+    15→  {
+    16→    crypto: 'BTC',
+    17→    label: 'Bitcoin (BTC)',
+    18→    icon: '\u20BF',
+    19→    network: 'Bitcoin Network',
+    20→    color: '#f59e0b',
+    21→    bg: '#fffbeb',
+    22→    address: 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
+    23→    warning: 'Only send BTC to this address. Sending any other asset may result in permanent loss.',
+    24→  },
+    25→  {
+    26→    crypto: 'ETH',
+    27→    label: 'Ethereum (ETH)',
+    28→    icon: '\u039E',
+    29→    network: 'ERC-20',
+    30→    color: '#6366f1',
+    31→    bg: '#eef2ff',
+    32→    address: '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
+    33→    warning: 'Only send ETH to this address. Do not send ERC-20 tokens unless specified.',
+    34→  },
+    35→  {
+    36→    crypto: 'USDT',
+    37→    label: 'Tether (USDT)',
+    38→    icon: '\u20AE',
+    39→    network: 'TRC-20',
+    40→    color: '#059669',
+    41→    bg: '#ecfdf5',
+    42→    address: 'TN2YqRhkJo8K6EvKqLzGenzFDLvxk4cJqB',
+    43→    warning: 'Only send USDT (TRC-20) to this address. Ensure you select TRC-20 network on your wallet.',
+    44→  },
+    45→];
+    46→
+    47→const CRYPTO_OPTIONS = [
+    48→  { value: 'BTC', label: 'Bitcoin (BTC)', icon: '₿' },
+    49→  { value: 'ETH', label: 'Ethereum (ETH)', icon: 'Ξ' },
+    50→  { value: 'USDT', label: 'Tether (USDT)', icon: '₮' },
+    51→];
+    52→
+    53→const TABS = ['Wallet', 'Deposit', 'Withdraw', 'Deposit History'];
+    54→
+    55→const STATUS_CONFIG = {
+    56→  completed: { label: 'Completed', bg: '#ecfdf5', color: '#059669' },
+    57→  confirmed: { label: 'Confirmed', bg: '#ecfdf5', color: '#059669' },
+    58→  pending: { label: 'Pending', bg: '#fffbeb', color: '#d97706' },
+    59→  processing: { label: 'Processing', bg: '#eff6ff', color: '#1a56db' },
+    60→  failed: { label: 'Failed', bg: '#fef2f2', color: '#dc2626' },
+    61→  rejected: { label: 'Rejected', bg: '#fef2f2', color: '#dc2626' },
+    62→  expired: { label: 'Expired', bg: '#fef2f2', color: '#dc2626' },
+    63→};
+    64→
+    65→export default function CryptoDepositPage() {
+    66→  const [activeTab, setActiveTab] = useState('Wallet');
+    67→
+    68→  // Wallet state
+    69→  const [wallet, setWallet] = useState(null);
+    70→  const [loadingWallet, setLoadingWallet] = useState(true);
+    71→  const [walletError, setWalletError] = useState('');
+    72→
+    73→  // Deposit form state
+    74→  const [crypto, setCrypto] = useState('BTC');
+    75→  const [usdAmount, setUsdAmount] = useState('');
+    76→  const [screenshot, setScreenshot] = useState(null);
+    77→  const [screenshotPreview, setScreenshotPreview] = useState(null);
+    78→  const [submitting, setSubmitting] = useState(false);
+    79→
+    80→  // Deposit history state
+    81→  const [transactions, setTransactions] = useState([]);
+    82→  const [loadingTx, setLoadingTx] = useState(true);
+    83→  const [txError, setTxError] = useState('');
+    84→
+    85→  const screenshotRef = useRef(null);
+    86→
+    87→  // Withdrawal state
+    88→  const [withdrawCrypto, setWithdrawCrypto] = useState('BTC');
+    89→  const [withdrawAmount, setWithdrawAmount] = useState('');
+    90→  const [withdrawDest, setWithdrawDest] = useState('');
+    91→  const [submittingWithdraw, setSubmittingWithdraw] = useState(false);
+    92→
+    93→  // Fetch wallet
+    94→  const fetchWallet = useCallback(async () => {
+    95→    setLoadingWallet(true);
+    96→    setWalletError('');
+    97→    try {
+    98→      const data = await cryptoService.getWallet();
+    99→      setWallet(data);
+   100→    } catch (err) {
+   101→      setWalletError(err?.response?.data?.detail || err?.message || 'Failed to load wallet');
+   102→    } finally {
+   103→      setLoadingWallet(false);
+   104→    }
+   105→  }, []);
+   106→
+   107→  // Fetch transactions
+   108→  const fetchTransactions = useCallback(async () => {
+   109→    setLoadingTx(true);
+   110→    setTxError('');
+   111→    try {
+   112→      const data = await cryptoService.getTransactions();
+   113→      const items = Array.isArray(data) ? data : data?.results || data?.data || [];
+   114→      setTransactions(items);
+   115→    } catch (err) {
+   116→      setTxError(err?.response?.data?.detail || err?.message || 'Failed to load transactions');
+   117→    } finally {
+   118→      setLoadingTx(false);
+   119→    }
+   120→  }, []);
+   121→
+   122→  useEffect(() => {
+   123→    if (activeTab === 'Wallet' || activeTab === 'Withdraw') fetchWallet();
+   124→    if (activeTab === 'Deposit History') fetchTransactions();
+   125→  }, [activeTab, fetchWallet, fetchTransactions]);
+   126→
+   127→  // Estimated crypto amount
+   128→  const estimatedCrypto = usdAmount && parseFloat(usdAmount) > 0
+   129→    ? (parseFloat(usdAmount) / CRYPTO_RATES[crypto]).toFixed(
+   130→        crypto === 'BTC' ? 8 : crypto === 'ETH' ? 6 : 2
+   131→      )
+   132→    : '0';
+   133→
+   134→  const selectedCrypto = CRYPTO_OPTIONS.find((c) => c.value === crypto);
+   135→
+   136→  // Handle screenshot
+   137→  const handleScreenshot = (e) => {
+   138→    const file = e.target.files?.[0];
+   139→    if (file) {
+   140→      setScreenshot(file);
+   141→      const reader = new FileReader();
+   142→      reader.onloadend = () => setScreenshotPreview(reader.result);
+   143→      reader.readAsDataURL(file);
+   144→    }
+   145→  };
+   146→
+   147→  // Copy wallet address
+   148→  const copyAddress = () => {
+   149→    const addr = wallet?.address || '';
+   150→    if (!addr) return;
+   151→    navigator.clipboard.writeText(addr).then(() => {
+   152→      toast.success('Address copied to clipboard');
+   153→    }).catch(() => {
+   154→      toast.error('Failed to copy address');
+   155→    });
+   156→  };
+   157→
+   158→  // Submit deposit
+   159→  const handleSubmit = async (e) => {
+   160→    e.preventDefault();
+   161→
+   162→    if (!usdAmount || parseFloat(usdAmount) <= 0) {
+   163→      toast.error('Please enter a valid USD amount');
+   164→      return;
+   165→    }
+   166→
+   167→    setSubmitting(true);
+   168→    try {
+   169→      if (screenshot) {
+   170→        const formData = new FormData();
+   171→        formData.append('crypto_currency', crypto);
+   172→        formData.append('usd_amount', usdAmount);
+   173→        formData.append('screenshot', screenshot);
+   174→        await cryptoService.createDeposit(formData);
+   175→      } else {
+   176→        await cryptoService.createDeposit({
+   177→          crypto_currency: crypto,
+   178→          usd_amount: parseFloat(usdAmount),
+   179→        });
+   180→      }
+   181→
+   182→      toast.success('Crypto deposit submitted successfully');
+   183→      setUsdAmount('');
+   184→      setScreenshot(null);
+   185→      setScreenshotPreview(null);
+   186→      if (screenshotRef.current) screenshotRef.current.value = '';
+   187→      fetchWallet();
+   188→    } catch (err) {
+   189→      const msg = err?.response?.data?.detail || err?.response?.data?.error || err?.message || 'Deposit failed. Please try again.';
+   190→      toast.error(msg);
+   191→    } finally {
+   192→      setSubmitting(false);
+   193→    }
+   194→  };
+   195→
+   196→  // Submit withdrawal
+   197→  const handleWithdraw = async (e) => {
+   198→    e.preventDefault();
+   199→    if (!withdrawAmount || parseFloat(withdrawAmount) <= 0) {
+   200→      toast.error('Please enter a valid crypto amount');
+   201→      return;
+   202→    }
+   203→    if (!withdrawDest.trim()) {
+   204→      toast.error('Please enter a destination wallet address');
+   205→      return;
+   206→    }
+   207→
+   208→    setSubmittingWithdraw(true);
+   209→    try {
+   210→      await cryptoService.createWithdrawal({
+   211→        crypto_currency: withdrawCrypto,
+   212→        amount: parseFloat(withdrawAmount),
+   213→        destination_address: withdrawDest.trim(),
+   214→      });
+   215→      toast.success('Crypto withdrawal submitted successfully');
+   216→      setWithdrawAmount('');
+   217→      setWithdrawDest('');
+   218→      fetchWallet();
+   219→      fetchTransactions();
+   220→    } catch (err) {
+   221→      const msg = err?.response?.data?.detail || err?.response?.data?.error || err?.message || 'Withdrawal failed. Please try again.';
+   222→      toast.error(msg);
+   223→    } finally {
+   224→      setSubmittingWithdraw(false);
+   225→    }
+   226→  };
+   227→
+   228→  const getStatusBadge = (status) => {
+   229→    const s = (status || '').toLowerCase();
+   230→    const cfg = STATUS_CONFIG[s] || { label: status || 'Unknown', bg: '#f9fafb', color: '#6b7280' };
+   231→    return (
+   232→      <span style={{
+   233→        display: 'inline-flex',
+   234→        alignItems: 'center',
+   235→        gap: '6px',
+   236→        padding: '4px 12px',
+   237→        borderRadius: '100px',
+   238→        fontSize: '12px',
+   239→        fontWeight: 600,
+   240→        backgroundColor: cfg.bg,
+   241→        color: cfg.color,
+   242→      }}>
+   243→        <span style={{
+   244→          width: '6px',
+   245→          height: '6px',
+   246→          borderRadius: '50%',
+   247→          backgroundColor: cfg.color,
+   248→        }} />
+   249→        {cfg.label}
+   250→      </span>
+   251→    );
+   252→  };
+   253→
+   254→  const truncateHash = (hash) => {
+   255→    if (!hash) return '—';
+   256→    return hash.length > 16 ? `${hash.slice(0, 8)}...${hash.slice(-8)}` : hash;
+   257→  };
+   258→
+   259→  return (
+   260→    <>
+   261→      <Navbar />
+   262→      <div style={s.page}>
+   263→        <div style={s.container}>
+   264→          {/* Page Header */}
+   265→          <h1 className="cp-page-title" style={s.pageTitle}>Crypto</h1>
+   266→          <p style={s.pageDescription}>
+   267→            Deposit and withdraw cryptocurrency from your CrestPoint Credit account.
+   268→          </p>
+   269→
+   270→          {/* Tabs */}
+   271→          <div className="cp-tab-bar" style={s.tabBar}>
+   272→            {TABS.map((tab) => (
+   273→              <button
+   274→                key={tab}
+   275→                onClick={() => setActiveTab(tab)}
+   276→                style={{
+   277→                  ...s.tabBtn,
+   278→                  ...(activeTab === tab ? s.tabBtnActive : {}),
+   279→                }}
+   280→              >
+   281→                {tab}
+   282→              </button>
+   283→            ))}
+   284→          </div>
+   285→
+   286→          {/* Tab: Wallet */}
+   287→          {activeTab === 'Wallet' && (
+   288→            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+   289→              {/* Wallet Info Card */}
+   290→              {loadingWallet ? (
+   291→                <div style={s.card}>
+   292→                  <LoadingSpinner size="sm" text="Loading wallet..." />
+   293→                </div>
+   294→              ) : walletError ? (
+   295→                <div style={s.card}>
+   296→                  <div style={s.errorBox}>
+   297→                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, marginTop: '1px' }}>
+   298→                      <circle cx="12" cy="12" r="10" />
+   299→                      <line x1="15" y1="9" x2="9" y2="15" />
+   300→                      <line x1="9" y1="9" x2="15" y2="15" />
+   301→                    </svg>
+   302→                    <span>{walletError}</span>
+   303→                  </div>
+   304→                </div>
+   305→              ) : (
+   306→                <>
+   307→                  {/* Main wallet balance card */}
+   308→                  <div style={s.walletCard}>
+   309→                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
+   310→                      <div>
+   311→                        <p style={s.walletLabel}>Wallet Address</p>
+   312→                        <div style={s.addressRow}>
+   313→                          <span style={s.addressText}>{wallet?.address || 'N/A'}</span>
+   314→                          <button onClick={copyAddress} style={s.copyBtn} title="Copy address">
+   315→                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+   316→                              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+   317→                              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+   318→                            </svg>
+   319→                          </button>
+   320→                        </div>
+   321→                      </div>
+   322→                      {wallet?.currency && (
+   323→                        <span style={s.walletCurrencyBadge}>
+   324→                          {wallet.currency}
+   325→                        </span>
+   326→                      )}
+   327→                    </div>
+   328→
+   329→                    <div style={s.walletBalanceRow}>
+   330→                      <p style={s.walletLabel}>Balance</p>
+   331→                      <p style={s.walletBalance}>
+   332→                        {formatCurrency(wallet?.balance || 0, wallet?.currency || 'USD')}
+   333→                      </p>
+   334→                    </div>
+   335→                  </div>
+   336→
+   337→                  {/* Deposit Wallet Addresses */}
+   338→                  <div className="cp-card" style={{
+   339→                    backgroundColor: '#ffffff',
+   340→                    borderRadius: '12px',
+   341→                    border: '1px solid #e5e7eb',
+   342→                    padding: '24px',
+   343→                    boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+   344→                  }}>
+   345→                    <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#111827', margin: '0 0 20px 0' }}>
+   346→                      Deposit Wallet Addresses
+   347→                    </h3>
+   348→                    <p style={{ fontSize: '13px', color: '#6b7280', margin: '0 0 20px 0', lineHeight: '20px' }}>
+   349→                      Send cryptocurrency to the appropriate address below. Only send the correct crypto type to each address.
+   350→                    </p>
+   351→                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+   352→                      {WALLET_ADDRESSES.map((wa) => (
+   353→                        <div key={wa.crypto} style={{
+   354→                          backgroundColor: '#f9fafb',
+   355→                          borderRadius: '10px',
+   356→                          border: '1px solid #e5e7eb',
+   357→                          padding: '16px',
+   358→                        }}>
+   359→                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+   360→                            <span style={{ fontSize: '20px' }}>{wa.icon}</span>
+   361→                            <span style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>{wa.label}</span>
+   362→                            <span style={{
+   363→                              fontSize: '11px', fontWeight: 600, color: wa.color,
+   364→                              backgroundColor: wa.bg, padding: '2px 8px',
+   365→                              borderRadius: '100px', marginLeft: 'auto',
+   366→                            }}>{wa.network}</span>
+   367→                          </div>
+   368→                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+   369→                            <span style={{
+   370→                              fontSize: '13px', fontFamily: 'monospace', color: '#374151',
+   371→                              wordBreak: 'break-all', lineHeight: '20px', flex: 1,
+   372→                            }}>{wa.address}</span>
+   373→                            <button
+   374→                              onClick={() => {
+   375→                                navigator.clipboard.writeText(wa.address).then(() => {
+   376→                                  toast.success(`${wa.crypto} address copied`);
+   377→                                }).catch(() => {
+   378→                                  toast.error('Failed to copy address');
+   379→                                });
+   380→                              }}
+   381→                              style={{
+   382→                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+   383→                                width: '32px', height: '32px', borderRadius: '8px',
+   384→                                border: '1px solid #d1d5db', backgroundColor: '#ffffff',
+   385→                                color: '#6b7280', cursor: 'pointer', flexShrink: 0,
+   386→                                transition: 'all 0.15s',
+   387→                              }}
+   388→                              title={`Copy ${wa.crypto} address`}
+   389→                            >
+   390→                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+   391→                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+   392→                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+   393→                              </svg>
+   394→                            </button>
+   395→                          </div>
+   396→                          <p style={{ fontSize: '11px', color: '#9ca3af', margin: '8px 0 0 0' }}>
+   397→                            {wa.warning}
+   398→                          </p>
+   399→                        </div>
+   400→                      ))}
+   401→                    </div>
+   402→                  </div>
+   403→                </>
+   404→              )}
+   405→            </div>
+   406→          )}
+   407→
+   408→          {/* Tab: Deposit */}
+   409→          {activeTab === 'Deposit' && (
+   410→            <div className="cp-card" style={s.card}>
+   411→              <h2 style={s.sectionTitle}>New Deposit</h2>
+   412→
+   413→              {/* Show selected crypto deposit address */}
+   414→              <div style={{
+   415→                backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0',
+   416→                borderRadius: '10px', padding: '14px 16px', marginBottom: '20px',
+   417→                display: 'flex', flexDirection: 'column', gap: '8px',
+   418→              }}>
+   419→                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+   420→                  <span style={{ fontSize: '13px', fontWeight: 600, color: '#059669' }}>
+   421→                    Send {crypto} to this address:
+   422→                  </span>
+   423→                  <span style={{
+   424→                    fontSize: '11px', fontWeight: 600, color: '#059669',
+   425→                    backgroundColor: '#dcfce7', padding: '2px 8px', borderRadius: '100px',
+   426→                  }}>
+   427→                    {WALLET_ADDRESSES.find(w => w.crypto === crypto)?.network}
+   428→                  </span>
+   429→                </div>
+   430→                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+   431→                  <span style={{
+   432→                    fontSize: '12px', fontFamily: 'monospace', color: '#374151',
+   433→                    wordBreak: 'break-all', lineHeight: '18px', flex: 1,
+   434→                  }}>
+   435→                    {WALLET_ADDRESSES.find(w => w.crypto === crypto)?.address}
+   436→                  </span>
+   437→                  <button
+   438→                    type="button"
+   439→                    onClick={() => {
+   440→                      const addr = WALLET_ADDRESSES.find(w => w.crypto === crypto)?.address;
+   441→                      if (addr) {
+   442→                        navigator.clipboard.writeText(addr).then(() => {
+   443→                          toast.success(`${crypto} address copied`);
+   444→                        }).catch(() => {});
+   445→                      }
+   446→                    }}
+   447→                    style={{
+   448→                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+   449→                      width: '30px', height: '30px', borderRadius: '6px',
+   450→                      border: '1px solid #86efac', backgroundColor: '#ffffff',
+   451→                      color: '#059669', cursor: 'pointer', flexShrink: 0,
+   452→                    }}
+   453→                    title="Copy address"
+   454→                  >
+   455→                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+   456→                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+   457→                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+   458→                    </svg>
+   459→                  </button>
+   460→                </div>
+   461→              </div>
+   462→
+   463→              <form onSubmit={handleSubmit}>
+   464→                  {/* Crypto Currency Selection */}
+   465→                  <div style={{ marginBottom: '16px' }}>
+   466→                    <label style={s.label}>Crypto Currency</label>
+   467→                    <div className="cp-crypto-grid" style={s.cryptoGrid}>
+   468→                      {CRYPTO_OPTIONS.map((opt) => (
+   469→                        <button
+   470→                          key={opt.value}
+   471→                          type="button"
+   472→                          onClick={() => setCrypto(opt.value)}
+   473→                          style={{
+   474→                            ...s.cryptoOption,
+   475→                            ...(crypto === opt.value ? s.cryptoOptionActive : {}),
+   476→                          }}
+   477→                        >
+   478→                          <span style={{ fontSize: '20px', lineHeight: 1 }}>{opt.icon}</span>
+   479→                          <span>{opt.label}</span>
+   480→                        </button>
+   481→                      ))}
+   482→                    </div>
+   483→                  </div>
+   484→
+   485→                  {/* USD Amount */}
+   486→                  <div style={{ marginBottom: '16px' }}>
+   487→                    <label style={s.label}>Amount in USD</label>
+   488→                    <div style={s.inputPrefixWrapper}>
+   489→                      <span style={s.inputPrefix}>$</span>
+   490→                      <input
+   491→                        type="number"
+   492→                        value={usdAmount}
+   493→                        onChange={(e) => setUsdAmount(e.target.value)}
+   494→                        placeholder="0.00"
+   495→                        min="0.01"
+   496→                        step="0.01"
+   497→                        style={s.inputWithPrefix}
+   498→                      />
+   499→                    </div>
+   500→                  </div>
+   501→
+   502→                  {/* Estimated Crypto */}
+   503→                  {usdAmount && parseFloat(usdAmount) > 0 && (
+   504→                    <div style={{ marginBottom: '16px' }}>
+   505→                      <label style={s.label}>Estimated {crypto} Amount</label>
+   506→                      <div style={s.estimatedBox}>
+   507→                        <span style={{ fontSize: '24px', fontWeight: 700, color: '#111827' }}>
+   508→                          {estimatedCrypto} <span style={{ fontSize: '16px', fontWeight: 500, color: '#6b7280' }}>{crypto}</span>
+   509→                        </span>
+   510→                        <span style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>
+   511→                          Rate: 1 {crypto} = {formatCurrency(CRYPTO_RATES[crypto])} USD
+   512→                        </span>
+   513→                      </div>
+   514→                    </div>
+   515→                  )}
+   516→
+   517→                  {/* Payment Screenshot */}
+   518→                  <div style={{ marginBottom: '16px' }}>
+   519→                    <label style={s.label}>Payment Screenshot <span style={{ color: '#9ca3af', fontWeight: 400 }}>(optional)</span></label>
+   520→                    {screenshotPreview ? (
+   521→                      <div style={s.previewContainer}>
+   522→                        <img src={screenshotPreview} alt="Payment screenshot" style={s.previewImage} />
+   523→                        <button
+   524→                          type="button"
+   525→                          onClick={() => {
+   526→                            setScreenshot(null);
+   527→                            setScreenshotPreview(null);
+   528→                            if (screenshotRef.current) screenshotRef.current.value = '';
+   529→                          }}
+   530→                          style={s.previewRemove}
+   531→                        >
+   532→                          &times;
+   533→                        </button>
+   534→                      </div>
+   535→                    ) : (
+   536→                      <label style={s.fileUploadBox}>
+   537→                        <input
+   538→                          ref={screenshotRef}
+   539→                          type="file"
+   540→                          accept="image/*"
+   541→                          onChange={handleScreenshot}
+   542→                          style={{ display: 'none' }}
+   543→                        />
+   544→                        <div style={{ textAlign: 'center' }}>
+   545→                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: '8px' }}>
+   546→                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+   547→                            <polyline points="17 8 12 3 7 8" />
+   548→                            <line x1="12" y1="3" x2="12" y2="15" />
+   549→                          </svg>
+   550→                          <p style={{ margin: 0, fontSize: '13px', color: '#6b7280' }}>Upload payment screenshot</p>
+   551→                          <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#9ca3af' }}>PNG, JPG, WEBP</p>
+   552→                        </div>
+   553→                      </label>
+   554→                    )}
+   555→                  </div>
+   556→
+   557→                  {/* Deposit Summary */}
+   558→                  {usdAmount && parseFloat(usdAmount) > 0 && (
+   559→                    <div style={s.summaryCard}>
+   560→                      <h3 style={s.summaryTitle}>Deposit Summary</h3>
+   561→                      <div style={s.summaryRow}>
+   562→                        <span style={s.summaryLabel}>Currency</span>
+   563→                        <span style={s.summaryValue}>{selectedCrypto?.label}</span>
+   564→                      </div>
+   565→                      <div style={s.summaryRow}>
+   566→                        <span style={s.summaryLabel}>USD Amount</span>
+   567→                        <span style={s.summaryValue}>{formatCurrency(parseFloat(usdAmount))}</span>
+   568→                      </div>
+   569→                      <div style={s.summaryRow}>
+   570→                        <span style={s.summaryLabel}>Estimated {crypto}</span>
+   571→                        <span style={s.summaryValue}>{estimatedCrypto} {crypto}</span>
+   572→                      </div>
+   573→                      <div style={s.summaryRow}>
+   574→                        <span style={s.summaryLabel}>Screenshot</span>
+   575→                        <span style={s.summaryValue}>{screenshot ? 'Attached' : 'Not attached'}</span>
+   576→                      </div>
+   577→                    </div>
+   578→                  )}
+   579→
+   580→                  {/* Submit */}
+   581→                  <div style={{ marginTop: '24px' }}>
+   582→                    <button
+   583→                      type="submit"
+   584→                      disabled={submitting}
+   585→                      style={{
+   586→                        ...s.primaryBtn,
+   587→                        opacity: submitting ? 0.7 : 1,
+   588→                        cursor: submitting ? 'not-allowed' : 'pointer',
+   589→                        display: 'flex',
+   590→                        alignItems: 'center',
+   591→                        gap: '8px',
+   592→                        justifyContent: 'center',
+   593→                      }}
+   594→                    >
+   595→                      {submitting ? (
+   596→                        <>
+   597→                          <div style={{
+   598→                            width: '16px',
+   599→                            height: '16px',
+   600→                            border: '2px solid rgba(255,255,255,0.3)',
+   601→                            borderTopColor: '#fff',
+   602→                            borderRadius: '50%',
+   603→                            animation: 'lc-spin 0.8s linear infinite',
+   604→                          }} />
+   605→                          Processing...
+   606→                        </>
+   607→                      ) : (
+   608→                        <>
+   609→                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+   610→                            <line x1="12" y1="1" x2="12" y2="23" />
+   611→                            <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+   612→                          </svg>
+   613→                          Submit Deposit
+   614→                        </>
+   615→                      )}
+   616→                    </button>
+   617→                    <style>{`@keyframes lc-spin { to { transform: rotate(360deg); } }`}</style>
+   618→                  </div>
+   619→                </form>
+   620→              </div>
+   621→          )}
+   622→
+   623→          {/* Tab: Withdraw */}
+   624→          {activeTab === 'Withdraw' && (
+   625→            <div className="cp-card" style={s.card}>
+   626→              {loadingWallet ? (
+   627→                <LoadingSpinner size="sm" text="Loading..." />
+   628→              ) : (
+   629→                <form onSubmit={handleWithdraw} style={s.form}>
+   630→                  <div style={{ marginBottom: '20px' }}>
+   631→                    <label style={s.label}>Select Cryptocurrency</label>
+   632→                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+   633→                      {CRYPTO_OPTIONS.map((opt) => (
+   634→                        <button
+   635→                          key={opt.value}
+   636→                          type="button"
+   637→                          onClick={() => setWithdrawCrypto(opt.value)}
+   638→                          style={{
+   639→                            flex: 1,
+   640→                            minWidth: '120px',
+   641→                            padding: '14px 16px',
+   642→                            borderRadius: '10px',
+   643→                            border: withdrawCrypto === opt.value ? '2px solid #1a56db' : '1px solid #e5e7eb',
+   644→                            backgroundColor: withdrawCrypto === opt.value ? '#eff6ff' : '#ffffff',
+   645→                            color: withdrawCrypto === opt.value ? '#1a56db' : '#374151',
+   646→                            fontSize: '14px',
+   647→                            fontWeight: 600,
+   648→                            cursor: 'pointer',
+   649→                            fontFamily: 'Inter, -apple-system, sans-serif',
+   650→                            display: 'flex',
+   651→                            alignItems: 'center',
+   652→                            gap: '8px',
+   653→                            justifyContent: 'center',
+   654→                          }}
+   655→                        >
+   656→                          <span style={{ fontSize: '20px' }}>{opt.icon}</span>
+   657→                          {opt.label}
+   658→                        </button>
+   659→                      ))}
+   660→                    </div>
+   661→                  </div>
+   662→
+   663→                  <div style={s.fieldGroup}>
+   664→                    <label style={s.label}>Amount ({withdrawCrypto})</label>
+   665→                    <input
+   666→                      type="number"
+   667→                      step="any"
+   668→                      min="0"
+   669→                      value={withdrawAmount}
+   670→                      onChange={(e) => setWithdrawAmount(e.target.value)}
+   671→                      style={s.input}
+   672→                      required
+   673→                    />
+   674→                    {withdrawAmount && parseFloat(withdrawAmount) > 0 && (
+   675→                      <p style={{ fontSize: '13px', color: '#6b7280', margin: '6px 0 0' }}>
+   676→                        Estimated USD value: ${(parseFloat(withdrawAmount) * CRYPTO_RATES[withdrawCrypto]).toFixed(2)}
+   677→                      </p>
+   678→                    )}
+   679→                  </div>
+   680→
+   681→                  <div style={s.fieldGroup}>
+   682→                    <label style={s.label}>Destination Wallet Address</label>
+   683→                    <input
+   684→                      type="text"
+   685→                      value={withdrawDest}
+   686→                      onChange={(e) => setWithdrawDest(e.target.value)}
+   687→                      style={s.input}
+   688→                      placeholder="0x..."
+   689→                      required
+   690→                    />
+   691→                  </div>
+   692→
+   693→                  <button
+   694→                    type="submit"
+   695→                    disabled={submittingWithdraw}
+   696→                    style={{
+   697→                      width: '100%',
+   698→                      padding: '14px',
+   699→                      borderRadius: '10px',
+   700→                      border: 'none',
+   701→                      backgroundColor: submittingWithdraw ? '#9ca3af' : '#1a56db',
+   702→                      color: '#ffffff',
+   703→                      fontSize: '15px',
+   704→                      fontWeight: 600,
+   705→                      cursor: submittingWithdraw ? 'not-allowed' : 'pointer',
+   706→                      fontFamily: 'Inter, -apple-system, sans-serif',
+   707→                    }}
+   708→                  >
+   709→                    {submittingWithdraw ? 'Submitting...' : 'Submit Withdrawal'}
+   710→                  </button>
+   711→                </form>
+   712→              )}
+   713→            </div>
+   714→          )}
+   715→
+   716→          {/* Tab: Deposit History */}
+   717→          {activeTab === 'Deposit History' && (
+   718→            <div className="cp-card" style={s.card}>
+   719→              {loadingTx ? (
+   720→                <LoadingSpinner size="sm" text="Loading transactions..." />
+   721→              ) : txError ? (
+   722→                <div style={s.errorBox}>
+   723→                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, marginTop: '1px' }}>
+   724→                    <circle cx="12" cy="12" r="10" />
+   725→                    <line x1="15" y1="9" x2="9" y2="15" />
+   726→                    <line x1="9" y1="9" x2="15" y2="15" />
+   727→                  </svg>
+   728→                  <span>{txError}</span>
+   729→                </div>
+   730→              ) : transactions.length === 0 ? (
+   731→                <div style={s.emptyState}>
+   732→                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" strokeWidth="1.5" style={{ marginBottom: '12px' }}>
+   733→                    <path d="M12 2L2 7l10 5 10-5-10-5z" />
+   734→                    <path d="M2 17l10 5 10-5" />
+   735→                    <path d="M2 12l10 5 10-5" />
+   736→                  </svg>
+   737→                  <p style={{ margin: 0, color: '#6b7280', fontSize: '14px' }}>
+   738→                    No crypto deposits yet. Make your first deposit to get started.
+   739→                  </p>
+   740→                </div>
+   741→              ) : (
+   742→                <div className="cp-table-wrapper" style={s.tableWrapper}>
+   743→                  <table style={s.table}>
+   744→                    <thead>
+   745→                      <tr>
+   746→                        <th style={s.th}>Date</th>
+   747→                        <th style={s.th}>Reference</th>
+   748→                        <th style={s.th}>Crypto</th>
+   749→                        <th style={s.th}>Amount</th>
+   750→                        <th style={s.th}>USD Amount</th>
+   751→                        <th style={s.th}>Status</th>
+   752→                        <th style={s.th}>TX Hash</th>
+   753→                      </tr>
+   754→                    </thead>
+   755→                    <tbody>
+   756→                      {transactions.map((tx, idx) => (
+   757→                        <tr key={tx.id || idx} style={s.tr}>
+   758→                          <td style={s.td}>{formatDate(tx.created_at || tx.date)}</td>
+   759→                          <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '13px' }}>
+   760→                            {tx.reference || tx.id || '—'}
+   761→                          </td>
+   762→                          <td style={s.td}>
+   763→                            <span style={{ fontWeight: 600, color: '#111827' }}>
+   764→                              {tx.crypto_currency || tx.currency || '—'}
+   765→                            </span>
+   766→                          </td>
+   767→                          <td style={{ ...s.td, fontWeight: 600, color: '#111827' }}>
+   768→                            {tx.crypto_amount != null ? `${tx.crypto_amount} ${tx.crypto_currency || ''}` : '—'}
+   769→                          </td>
+   770→                          <td style={{ ...s.td, fontWeight: 600, color: '#111827' }}>
+   771→                            {formatCurrency(tx.usd_amount || tx.amount, 'USD')}
+   772→                          </td>
+   773→                          <td style={s.td}>{getStatusBadge(tx.status)}</td>
+   774→                          <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '13px', color: '#1a56db' }}>
+   775→                            {tx.tx_hash ? (
+   776→                              <span title={tx.tx_hash}>{truncateHash(tx.tx_hash)}</span>
+   777→                            ) : '—'}
+   778→                          </td>
+   779→                        </tr>
+   780→                      ))}
+   781→                    </tbody>
+   782→                  </table>
+   783→                </div>
+   784→              )}
+   785→            </div>
+   786→          )}
+   787→        </div>
+   788→      </div>
+   789→    </>
+   790→  );
+   791→}
+   792→
+   793→const s = {
+   794→  page: {
+   795→    paddingTop: '64px',
+   796→    minHeight: '100vh',
+   797→    backgroundColor: '#f9fafb',
+   798→    fontFamily: 'Inter, -apple-system, sans-serif',
+   799→  },
+   800→  container: {
+   801→    maxWidth: '1200px',
+   802→    margin: '0 auto',
+   803→    padding: '32px 24px',
+   804→  },
+   805→  pageTitle: {
+   806→    fontSize: '24px',
+   807→    fontWeight: 700,
+   808→    color: '#111827',
+   809→    margin: '0 0 8px 0',
+   810→  },
+   811→  pageDescription: {
+   812→    fontSize: '14px',
+   813→    color: '#6b7280',
+   814→    margin: '0 0 24px 0',
+   815→    lineHeight: '20px',
+   816→  },
+   817→  tabBar: {
+   818→    display: 'flex',
+   819→    gap: '4px',
+   820→    marginBottom: '24px',
+   821→    borderBottom: '1px solid #e5e7eb',
+   822→    paddingBottom: '0',
+   823→  },
+   824→  tabBtn: {
+   825→    padding: '10px 20px',
+   826→    fontSize: '14px',
+   827→    fontWeight: 500,
+   828→    color: '#6b7280',
+   829→    backgroundColor: 'transparent',
+   830→    border: 'none',
+   831→    borderBottom: '2px solid transparent',
+   832→    cursor: 'pointer',
+   833→    fontFamily: 'Inter, -apple-system, sans-serif',
+   834→    transition: 'color 0.15s, border-color 0.15s',
+   835→    marginBottom: '-1px',
+   836→  },
+   837→  tabBtnActive: {
+   838→    color: '#1a56db',
+   839→    borderBottomColor: '#1a56db',
+   840→    fontWeight: 600,
+   841→  },
+   842→  card: {
+   843→    backgroundColor: '#ffffff',
+   844→    borderRadius: '12px',
+   845→    border: '1px solid #e5e7eb',
+   846→    padding: '24px',
+   847→    boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+   848→  },
+   849→  sectionTitle: {
+   850→    fontSize: '18px',
+   851→    fontWeight: 600,
+   852→    color: '#111827',
+   853→    margin: '0 0 20px 0',
+   854→  },
+   855→  // Wallet card
+   856→  walletCard: {
+   857→    background: 'linear-gradient(135deg, #1a56db 0%, #1e40af 100%)',
+   858→    borderRadius: '12px',
+   859→    padding: '24px',
+   860→    color: '#ffffff',
+   861→  },
+   862→  walletLabel: {
+   863→    fontSize: '12px',
+   864→    fontWeight: 500,
+   865→    color: 'rgba(255,255,255,0.7)',
+   866→    textTransform: 'uppercase',
+   867→    letterSpacing: '0.5px',
+   868→    margin: '0 0 6px 0',
+   869→  },
+   870→  addressRow: {
+   871→    display: 'flex',
+   872→    alignItems: 'center',
+   873→    gap: '8px',
+   874→  },
+   875→  addressText: {
+   876→    fontSize: '14px',
+   877→    fontFamily: 'monospace',
+   878→    color: '#ffffff',
+   879→    wordBreak: 'break-all',
+   880→    lineHeight: '20px',
+   881→  },
+   882→  copyBtn: {
+   883→    display: 'flex',
+   884→    alignItems: 'center',
+   885→    justifyContent: 'center',
+   886→    width: '28px',
+   887→    height: '28px',
+   888→    borderRadius: '6px',
+   889→    border: '1px solid rgba(255,255,255,0.3)',
+   890→    backgroundColor: 'rgba(255,255,255,0.1)',
+   891→    color: '#ffffff',
+   892→    cursor: 'pointer',
+   893→    flexShrink: 0,
+   894→    transition: 'background-color 0.15s',
+   895→  },
+   896→  walletCurrencyBadge: {
+   897→    display: 'inline-flex',
+   898→    alignItems: 'center',
+   899→    padding: '4px 12px',
+   900→    borderRadius: '100px',
+   901→    fontSize: '13px',
+   902→    fontWeight: 600,
+   903→    backgroundColor: 'rgba(255,255,255,0.2)',
+   904→    color: '#ffffff',
+   905→  },
+   906→  walletBalanceRow: {
+   907→    borderTop: '1px solid rgba(255,255,255,0.2)',
+   908→    paddingTop: '16px',
+   909→  },
+   910→  walletBalance: {
+   911→    fontSize: '28px',
+   912→    fontWeight: 700,
+   913→    color: '#ffffff',
+   914→    margin: 0,
+   915→  },
+   916→  // Form elements
+   917→  label: {
+   918→    display: 'block',
+   919→    fontSize: '13px',
+   920→    fontWeight: 600,
+   921→    color: '#374151',
+   922→    marginBottom: '6px',
+   923→  },
+   924→  cryptoGrid: {
+   925→    display: 'grid',
+   926→    gridTemplateColumns: 'repeat(3, 1fr)',
+   927→    gap: '8px',
+   928→  },
+   929→  cryptoOption: {
+   930→    display: 'flex',
+   931→    flexDirection: 'column',
+   932→    alignItems: 'center',
+   933→    gap: '6px',
+   934→    padding: '14px 12px',
+   935→    borderRadius: '10px',
+   936→    border: '1px solid #e5e7eb',
+   937→    backgroundColor: '#ffffff',
+   938→    cursor: 'pointer',
+   939→    fontSize: '13px',
+   940→    fontWeight: 500,
+   941→    color: '#374151',
+   942→    fontFamily: 'Inter, -apple-system, sans-serif',
+   943→    transition: 'border-color 0.15s, background-color 0.15s',
+   944→  },
+   945→  cryptoOptionActive: {
+   946→    border: '2px solid #1a56db',
+   947→    backgroundColor: '#eff6ff',
+   948→    color: '#1a56db',
+   949→  },
+   950→  inputPrefixWrapper: {
+   951→    position: 'relative',
+   952→  },
+   953→  inputPrefix: {
+   954→    position: 'absolute',
+   955→    left: '14px',
+   956→    top: '50%',
+   957→    transform: 'translateY(-50%)',
+   958→    fontSize: '14px',
+   959→    fontWeight: 600,
+   960→    color: '#6b7280',
+   961→    zIndex: 1,
+   962→  },
+   963→  inputWithPrefix: {
+   964→    width: '100%',
+   965→    padding: '10px 14px 10px 30px',
+   966→    fontSize: '14px',
+   967→    border: '1px solid #d1d5db',
+   968→    borderRadius: '8px',
+   969→    outline: 'none',
+   970→    boxSizing: 'border-box',
+   971→    fontFamily: 'Inter, -apple-system, sans-serif',
+   972→    color: '#111827',
+   973→    backgroundColor: '#ffffff',
+   974→    transition: 'border-color 0.15s',
+   975→  },
+   976→  estimatedBox: {
+   977→    backgroundColor: '#f0fdf4',
+   978→    border: '1px solid #bbf7d0',
+   979→    borderRadius: '8px',
+   980→    padding: '16px',
+   981→    textAlign: 'center',
+   982→  },
+   983→  fileUploadBox: {
+   984→    display: 'flex',
+   985→    alignItems: 'center',
+   986→    justifyContent: 'center',
+   987→    width: '100%',
+   988→    minHeight: '100px',
+   989→    border: '2px dashed #d1d5db',
+   990→    borderRadius: '8px',
+   991→    cursor: 'pointer',
+   992→    padding: '20px',
+   993→    backgroundColor: '#f9fafb',
+   994→    transition: 'border-color 0.15s, background-color 0.15s',
+   995→  },
+   996→  previewContainer: {
+   997→    position: 'relative',
+   998→    width: '100%',
+   999→    borderRadius: '8px',
+  1000→    overflow: 'hidden',
+  1001→    border: '1px solid #e5e7eb',
+  1002→  },
+  1003→  previewImage: {
+  1004→    width: '100%',
+  1005→    height: '140px',
+  1006→    objectFit: 'cover',
+  1007→    display: 'block',
+  1008→  },
+  1009→  previewRemove: {
+  1010→    position: 'absolute',
+  1011→    top: '6px',
+  1012→    right: '6px',
+  1013→    width: '24px',
+  1014→    height: '24px',
+  1015→    borderRadius: '50%',
+  1016→    border: 'none',
+  1017→    backgroundColor: 'rgba(0,0,0,0.6)',
+  1018→    color: '#fff',
+  1019→    fontSize: '14px',
+  1020→    cursor: 'pointer',
+  1021→    display: 'flex',
+  1022→    alignItems: 'center',
+  1023→    justifyContent: 'center',
+  1024→    lineHeight: 1,
+  1025→    padding: 0,
+  1026→  },
+  1027→  summaryCard: {
+  1028→    backgroundColor: '#f9fafb',
+  1029→    border: '1px solid #e5e7eb',
+  1030→    borderRadius: '10px',
+  1031→    padding: '20px',
+  1032→    marginBottom: '16px',
+  1033→  },
+  1034→  summaryTitle: {
+  1035→    fontSize: '14px',
+  1036→    fontWeight: 600,
+  1037→    color: '#111827',
+  1038→    margin: '0 0 12px 0',
+  1039→  },
+  1040→  summaryRow: {
+  1041→    display: 'flex',
+  1042→    justifyContent: 'space-between',
+  1043→    padding: '6px 0',
+  1044→  },
+  1045→  summaryLabel: {
+  1046→    fontSize: '13px',
+  1047→    color: '#6b7280',
+  1048→  },
+  1049→  summaryValue: {
+  1050→    fontSize: '13px',
+  1051→    fontWeight: 500,
+  1052→    color: '#111827',
+  1053→  },
+  1054→  primaryBtn: {
+  1055→    backgroundColor: '#1a56db',
+  1056→    color: '#fff',
+  1057→    padding: '10px 20px',
+  1058→    borderRadius: '8px',
+  1059→    border: 'none',
+  1060→    fontWeight: 500,
+  1061→    cursor: 'pointer',
+  1062→    fontSize: '14px',
+  1063→    fontFamily: 'Inter, -apple-system, sans-serif',
+  1064→    transition: 'background-color 0.15s',
+  1065→  },
+  1066→  // Table
+  1067→  tableWrapper: {
+  1068→    overflowX: 'auto',
+  1069→    borderRadius: '8px',
+  1070→    border: '1px solid #e5e7eb',
+  1071→  },
+  1072→  table: {
+  1073→    width: '100%',
+  1074→    borderCollapse: 'collapse',
+  1075→    fontSize: '14px',
+  1076→  },
+  1077→  th: {
+  1078→    padding: '12px 16px',
+  1079→    textAlign: 'left',
+  1080→    fontSize: '12px',
+  1081→    fontWeight: 600,
+  1082→    color: '#6b7280',
+  1083→    textTransform: 'uppercase',
+  1084→    letterSpacing: '0.5px',
+  1085→    backgroundColor: '#f9fafb',
+  1086→    borderBottom: '1px solid #e5e7eb',
+  1087→    whiteSpace: 'nowrap',
+  1088→  },
+  1089→  tr: {
+  1090→    borderBottom: '1px solid #f3f4f6',
+  1091→    transition: 'background-color 0.1s',
+  1092→  },
+  1093→  td: {
+  1094→    padding: '12px 16px',
+  1095→    color: '#374151',
+  1096→    whiteSpace: 'nowrap',
+  1097→  },
+  1098→  errorBox: {
+  1099→    display: 'flex',
+  1100→    alignItems: 'flex-start',
+  1101→    gap: '8px',
+  1102→    padding: '12px 16px',
+  1103→    backgroundColor: '#fef2f2',
+  1104→    border: '1px solid #fecaca',
+  1105→    borderRadius: '8px',
+  1106→    color: '#dc2626',
+  1107→    fontSize: '14px',
+  1108→  },
+  1109→  emptyState: {
+  1110→    display: 'flex',
+  1111→    flexDirection: 'column',
+  1112→    alignItems: 'center',
+  1113→    justifyContent: 'center',
+  1114→    padding: '48px 24px',
+  1115→    textAlign: 'center',
+  1116→  },
+  1117→};
