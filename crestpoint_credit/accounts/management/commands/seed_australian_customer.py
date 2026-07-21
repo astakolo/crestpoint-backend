@@ -53,14 +53,15 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        email = options["email"]
+        email = options["email"].strip().lower()
         password = options["password"]
         target_balance = Decimal(options["balance"])
 
-        # ── 1. Create or get user ──
+        # ── 1. Create or get user (case-insensitive lookup) ──
         user, created = User.objects.get_or_create(
-            email=email,
+            email__iexact=email,
             defaults={
+                "email": email,
                 "first_name": "Kristen",
                 "last_name": "Jordan Nagel",
                 "phone": "+61 412 345 678",
@@ -73,6 +74,9 @@ class Command(BaseCommand):
         if created:
             self.stdout.write(self.style.SUCCESS(f"  Created user: {email}"))
         else:
+            # Normalize existing user's email to lowercase if needed
+            if user.email != email:
+                user.email = email
             user.first_name = "Kristen"
             user.last_name = "Jordan Nagel"
             user.phone = "+61 412 345 678"

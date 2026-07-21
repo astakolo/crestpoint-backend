@@ -42,7 +42,7 @@ class LoginSerializer(serializers.Serializer):
         password = attrs.get("password")
 
         try:
-            user = User.objects.get(email=email)
+            user = User.objects.get(email__iexact=email)
         except User.DoesNotExist:
             logger.warning("Login attempt for non-existent email: %s", email)
             # Do NOT reveal whether the email exists – raise a generic error.
@@ -110,7 +110,7 @@ class TokenObtainPairSerializer(TokenObtainPairSerializer):
         email = attrs.get(self.username_field).strip().lower()
 
         try:
-            user = User.objects.get(email=email)
+            user = User.objects.get(email__iexact=email)
         except User.DoesNotExist:
             logger.warning("JWT token attempt for non-existent email: %s", email)
             raise AuthenticationFailed(
@@ -187,7 +187,7 @@ class PasswordResetRequestSerializer(serializers.Serializer):
         # Always return 200 for security – never reveal whether the email exists.
         # Only generate a token if the user actually exists so the email is sent.
         try:
-            user = User.objects.get(email=email)
+            user = User.objects.get(email__iexact=email)
         except User.DoesNotExist:
             logger.info("Password reset requested for non-existent email: %s", email)
             # Return the email so the view can respond generically.
@@ -243,7 +243,7 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
         # Retrieve the user.
         try:
-            user = User.objects.get(email=email)
+            user = User.objects.get(email__iexact=email)
         except User.DoesNotExist:
             raise serializers.ValidationError(
                 {"email": "No account found with this email address."},
@@ -298,7 +298,7 @@ class OTPEmailSerializer(serializers.Serializer):
         password = attrs.get("password")
 
         try:
-            user = User.objects.get(email=email)
+            user = User.objects.get(email__iexact=email)
         except User.DoesNotExist:
             raise serializers.ValidationError(
                 {"email": "Invalid email or password."},
@@ -505,7 +505,7 @@ class OTPVerifySerializer(serializers.Serializer):
 
         # Look up the user (credentials were already verified when OTP was sent)
         try:
-            user = User.objects.get(email=email)
+            user = User.objects.get(email__iexact=email)
         except User.DoesNotExist:
             raise serializers.ValidationError(
                 {"otp": "User not found. Please try logging in again."},
