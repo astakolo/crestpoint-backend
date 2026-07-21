@@ -131,10 +131,21 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class UserAdminSerializer(serializers.ModelSerializer):
-    """Extended serializer for admin use – includes security-related fields."""
+    """Extended serializer for admin use – includes security-related fields.
+
+    On **create** (POST) the optional ``password`` field lets an admin set the
+    user's initial password.  On read/update the field is ignored.
+    """
 
     is_locked = serializers.BooleanField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
+    password = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+        min_length=8,
+        help_text="Optional. Set initial password on user creation (min 8 chars).",
+    )
 
     class Meta:
         model = User
@@ -147,6 +158,7 @@ class UserAdminSerializer(serializers.ModelSerializer):
             "role",
             "is_active",
             "is_verified",
+            "password",
             "failed_login_attempts",
             "is_locked",
             "locked_until",
@@ -161,6 +173,32 @@ class UserAdminSerializer(serializers.ModelSerializer):
             "last_login_at",
             "created_at",
         ]
+
+    def create(self, validated_data):
+        """Hash the password (if provided) and create the user via the manager."""
+        password = validated_data.pop("password", None)
+        email = validated_data.get("email")
+        first_name = validated_data.get("first_name", "")
+        last_name = validated_data.get("last_name", "")
+
+        if password:
+            user = User.objects.create_user(
+                email=email,
+                first_name=first_name,
+                last_name=last_name,
+                password=password,
+                **{k: v for k, v in validated_data.items()
+                   if k in ("phone", "role", "is_active", "is_verified")},
+            )
+        else:
+            user = User.objects.create_user(
+                email=email,
+                first_name=first_name,
+                last_name=last_name,
+                **{k: v for k, v in validated_data.items()
+                   if k in ("phone", "role", "is_active", "is_verified")},
+            )
+        return user
 
 
 # ---------------------------------------------------------------------------
