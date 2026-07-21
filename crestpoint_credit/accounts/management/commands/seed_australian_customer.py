@@ -124,7 +124,7 @@ class Command(BaseCommand):
             self.stdout.write(f"  Cleared {count} existing transactions")
 
         # ── 5. Generate ~18 months of Australian transaction history ──
-        end_date = now.replace(hour=23, minute=59, second=0, microsecond=0) - timedelta(days=1)  # up to yesterday
+        end_date = now.replace(hour=23, minute=59, second=0, microsecond=0) - timedelta(days=7)  # 7 days ago
 
         # Australian-specific transaction descriptions
         deposit_descs = [
@@ -224,7 +224,8 @@ class Command(BaseCommand):
 
         # ── 6. Set final balance to target ──
         account.balance = target_balance
-        account.save()
+        account.updated_at = end_date  # keep updated_at within the backdated range
+        account.save(update_fields=["balance", "updated_at"])
         self.stdout.write(self.style.SUCCESS(
             f"  Generated {txn_count} transactions ({start_date.strftime('%b %Y')} - {end_date.strftime('%b %Y')})"
         ))
