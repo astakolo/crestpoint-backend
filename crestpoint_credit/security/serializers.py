@@ -283,20 +283,56 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
 
 class OTPEmailSerializer(serializers.Serializer):
-    """Validate email and generate + send a 6-digit OTP code."""
+    """Validate email AND password, then generate + send a 6-digit OTP code.
+
+    Credentials must be valid before an OTP is sent — this prevents OTP
+    flooding of arbitrary email addresses and ensures the caller actually
+    knows the password.
+    """
 
     email = serializers.EmailField(write_only=True)
+    password = serializers.CharField(write_only=True, style={"input_type": "password"})
 
     def validate(self, attrs):
         email = attrs.get("email").strip().lower()
+        password = attrs.get("password")
 
         try:
             user = User.objects.get(email=email)
         except User.DoesNotExist:
             raise serializers.ValidationError(
-                {"email": "No account found with this email address."},
-                code="user_not_found",
+                {"email": "Invalid email or password."},
+                code="authentication_failed",
             )
+
+        # Check whether the account is currently locked.
+        if user.is_locked:
+            raise serializers.ValidationError(
+                {"email": "Account temporarily locked. Please try again later."},
+                code="account_locked",
+            )
+
+        # Verify the password.
+        if not user.check_password(password):
+            user.increment_failed_login()
+            if user.is_locked:
+                raise serializers.ValidationError(
+                    {"email": "Account temporarily locked. Please try again later."},
+                    code="account_locked",
+                )
+            raise serializers.ValidationError(
+                {"email": "Invalid email or password."},
+                code="authentication_failed",
+            )
+
+        if not user.is_active:
+            raise serializers.ValidationError(
+                {"email": "This account has been deactivated."},
+                code="account_inactive",
+            )
+
+        # Credentials are valid — reset failed-login counter.
+        user.reset_failed_login()
 
         # Generate a 6-digit OTP
         otp = f"{random.randint(100000, 999999)}"
@@ -422,7 +458,11 @@ class OTPEmailRegisterSerializer(serializers.Serializer):
 
 
 class OTPVerifySerializer(serializers.Serializer):
-    """Verify a 6-digit OTP code for login."""
+    """Verify a 6-digit OTP code for login.
+
+    On success the user is looked up and returned so the view can issue
+    JWT tokens directly — no separate login call is needed.
+    """
 
     email = serializers.EmailField(write_only=True)
     otp = serializers.CharField(write_only=True, min_length=6, max_length=6)
@@ -463,7 +503,29 @@ class OTPVerifySerializer(serializers.Serializer):
         cache.delete(cache_key)
         cache.delete(attempts_key)
 
+        # Look up the user (credentials were already verified when OTP was sent)
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            raise serializers.ValidationError(
+                {"otp": "User not found. Please try logging in again."},
+                code="user_not_found",
+            )
+
+        # Double-check account is still active and not locked
+        if user.is_locked:
+            raise serializers.ValidationError(
+                {"otp": "Account temporarily locked. Please try again later."},
+                code="account_locked",
+            )
+        if not user.is_active:
+            raise serializers.ValidationError(
+                {"otp": "This account has been deactivated."},
+                code="account_inactive",
+            )
+
         attrs["email"] = email
+        attrs["user"] = user
         return attrs
 
 

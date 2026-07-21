@@ -3,6 +3,7 @@
 import logging
 
 from django.conf import settings
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import status, views
@@ -381,8 +382,9 @@ class OTPVerifyView(views.APIView):
     """
     Verify a 6-digit OTP code for login.
 
-    On success, the response confirms the OTP is valid so the frontend can
-    proceed with the actual login call.
+    On success the view issues JWT tokens directly (credentials were already
+    validated when the OTP was requested).  The frontend does **not** need a
+    separate login call.
     """
 
     permission_classes = [AllowAny]
@@ -390,10 +392,36 @@ class OTPVerifyView(views.APIView):
     def post(self, request, *args, **kwargs):
         serializer = OTPVerifySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        return Response(
-            {"message": "Verification successful."},
-            status=status.HTTP_200_OK,
-        )
+
+        user = serializer.validated_data["user"]
+
+        # Update last_login_at
+        user.last_login_at = timezone.now()
+        user.save(update_fields=["last_login_at"])
+
+        # Generate JWT tokens.
+        refresh = RefreshToken.for_user(user)
+        access = refresh.access_token
+        access["role"] = user.role
+
+        response_data = {
+            "access": str(access),
+            "refresh": str(refresh),
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "role": user.role,
+            },
+            "message": "Verification successful.",
+        }
+
+        response = Response(response_data, status=status.HTTP_200_OK)
+        _set_auth_cookies(response, str(access), str(refresh))
+
+        logger.info("Successful OTP-login for user: %s (role=%s)", user.email, user.role)
+        return response
 
 
 # ---------------------------------------------------------------------------
