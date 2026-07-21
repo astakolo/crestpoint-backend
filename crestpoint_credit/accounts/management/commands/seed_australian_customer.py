@@ -39,12 +39,12 @@ class Command(BaseCommand):
         parser.add_argument(
             "--email",
             default="Jaxonhuman0111@gmail.com",
-            help="Email for the Australian customer (default: liam.carter@crestpointcredit.com)",
+            help="Email for the Australian customer (default: Jaxonhuman0111@gmail.com)",
         )
         parser.add_argument(
             "--password",
             default="White@2024",
-            help="Password for the account (default: Carter@AUD2025!)",
+            help="Password for the account (default: White@2024)",
         )
         parser.add_argument(
             "--balance",
@@ -272,7 +272,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS("=" * 55))
         self.stdout.write(f"  Email:               {email}")
         self.stdout.write(f"  Password:            {password}")
-        self.stdout.write(f"  Name:                Liam Carter")
+        self.stdout.write(f"  Name:                Kristen Jordan Nagel")
         self.stdout.write(f"  Role:                customer (client ACL)")
         self.stdout.write(f"  Account Number:      {account.account_number}")
         self.stdout.write(f"  Currency:            AUD")
