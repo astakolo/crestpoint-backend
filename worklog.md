@@ -22,3 +22,20 @@ Stage Summary:
 - New login flow: email+password -> backend validates -> sends OTP -> user enters OTP -> backend issues JWT
 - No more "invalid username and password" error since credentials are validated before OTP
 ---
+---
+Task ID: 2
+Agent: Main
+Task: Remove OTP from login, verify Australian seed command
+
+Work Log:
+- Verified seed_australian_customer.py exists and is correct (Liam Carter, AUD $532K, backdated Jan 2025, 150 transactions)
+- Rewrote LoginPage.js to simple email+password form (no OTP steps)
+- Uses existing authService.login() which calls /auth/login/ directly
+- Pushed frontend commit b9c7db12
+
+Stage Summary:
+- Login is now direct: email + password -> JWT tokens (no OTP)
+- Backend LoginView already supports this - no backend changes needed
+- seed_australian_customer command ready: python manage.py seed_australian_customer
+- Australian user: liam.carter@crestpointcredit.com / Carter@AUD2025!
+---
