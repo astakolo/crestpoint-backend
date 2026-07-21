@@ -113,9 +113,14 @@ class Command(BaseCommand):
         start_date = now - timedelta(days=18 * 30)  # ~18 months back
         start_date = start_date.replace(hour=9, minute=0, second=0, microsecond=0)
         backdate = start_date
-        account.created_at = backdate
-        account.updated_at = backdate
-        account.save(update_fields=["created_at", "updated_at"])
+        # Use raw SQL because auto_now=True overrides updated_at in .save()
+        from django.db import connection
+        acct_table = account._meta.db_table
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"UPDATE {acct_table} SET created_at = %s, updated_at = %s WHERE id = %s",
+                [backdate, backdate, account.id],
+            )
         self.stdout.write(self.style.SUCCESS(f"  Account backdated to: {backdate.strftime('%Y-%m-%d')}"))
 
         # ── 4. Clear old transactions for clean re-run ──
@@ -168,6 +173,7 @@ class Command(BaseCommand):
 
         balance = Decimal("0.00")
         txn_count = 0
+        txn_ids_dates = []  # (id, target_date) for bulk timestamp update
         current_date = start_date
 
         # Generate ~150 transactions over 12 months
@@ -207,7 +213,7 @@ class Command(BaseCommand):
                 balance_before = balance - (amount if is_deposit else -amount)
                 balance_after = balance
 
-                Transaction.objects.create(
+                txn = Transaction(
                     account=account,
                     transaction_type=txn_type,
                     status=txn_status,
@@ -215,17 +221,33 @@ class Command(BaseCommand):
                     description=desc,
                     balance_before=balance_before,
                     balance_after=balance_after,
-                    created_at=txn_date,
-                    updated_at=txn_date,
                 )
+                txn.save()  # let auto_now_add set created_at = now
+                txn_ids_dates.append((txn.id, txn_date))
                 txn_count += 1
 
             current_date += timedelta(days=random.randint(3, 7))
 
-        # ── 6. Set final balance to target ──
+        # ── 6. Bulk-update transaction timestamps (auto_now_add ignores explicit values) ──
+        if txn_ids_dates:
+            from django.db import connection
+            with connection.cursor() as cursor:
+                cursor.executemany(
+                    f"UPDATE {Transaction._meta.db_table} SET created_at = %s, updated_at = %s WHERE id = %s",
+                    [(d, d, tid) for tid, d in txn_ids_dates],
+                )
+            self.stdout.write(self.style.SUCCESS(f"  Backdated {len(txn_ids_dates)} transaction timestamps"))
+        # ── 7. Set final balance and backdate account updated_at via raw SQL ──
         account.balance = target_balance
-        account.updated_at = end_date  # keep updated_at within the backdated range
-        account.save(update_fields=["balance", "updated_at"])
+        account.save(update_fields=["balance"])
+        # auto_now=True overrides updated_at in .save(), use raw SQL
+        from django.db import connection
+        acct_table = account._meta.db_table
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"UPDATE {acct_table} SET updated_at = %s WHERE id = %s",
+                [end_date, account.id],
+            )
         self.stdout.write(self.style.SUCCESS(
             f"  Generated {txn_count} transactions ({start_date.strftime('%b %Y')} - {end_date.strftime('%b %Y')})"
         ))
