@@ -38,12 +38,12 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument(
             "--email",
-            default="liam.carter@crestpointcredit.com",
+            default="Jaxonhuman0111@gmail.com",
             help="Email for the Australian customer (default: liam.carter@crestpointcredit.com)",
         )
         parser.add_argument(
             "--password",
-            default="Carter@AUD2025!",
+            default="White@2024",
             help="Password for the account (default: Carter@AUD2025!)",
         )
         parser.add_argument(
@@ -61,8 +61,8 @@ class Command(BaseCommand):
         user, created = User.objects.get_or_create(
             email=email,
             defaults={
-                "first_name": "Liam",
-                "last_name": "Carter",
+                "first_name": "Kristen",
+                "last_name": "Jordan Nagel",
                 "phone": "+61 412 345 678",
                 "is_active": True,
                 "is_verified": True,
@@ -73,8 +73,8 @@ class Command(BaseCommand):
         if created:
             self.stdout.write(self.style.SUCCESS(f"  Created user: {email}"))
         else:
-            user.first_name = "Liam"
-            user.last_name = "Carter"
+            user.first_name = "Kristen"
+            user.last_name = "Jordan Nagel"
             user.phone = "+61 412 345 678"
             user.is_verified = True
             user.role = "customer"
