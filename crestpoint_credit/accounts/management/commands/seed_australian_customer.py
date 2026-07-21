@@ -8,8 +8,8 @@ Usage:
 Creates:
   - User: Australian customer with client (customer) ACL
   - Savings account with A$532,000.00 balance (AUD currency)
-  - Account backdated to January 2025
-  - 12 months of realistic Australian transaction history (Jan 2025 - Jun 2026)
+  - Account backdated 18 months from today
+  - ~18 months of realistic Australian transaction history up to yesterday
   - Mix of deposits, withdrawals, and transfers
 """
 
@@ -108,9 +108,11 @@ class Command(BaseCommand):
             account.save(update_fields=["currency"])
             self.stdout.write(self.style.WARNING("  Updated account currency to AUD"))
 
-        # ── 3. Backdate account to January 2025 ──
-        from datetime import datetime
-        backdate = timezone.make_aware(datetime(2025, 1, 15, 9, 0, 0))
+        # ── 3. Backdate account to 18 months ago ──
+        now = timezone.now()
+        start_date = now - timedelta(days=18 * 30)  # ~18 months back
+        start_date = start_date.replace(hour=9, minute=0, second=0, microsecond=0)
+        backdate = start_date
         account.created_at = backdate
         account.updated_at = backdate
         account.save(update_fields=["created_at", "updated_at"])
@@ -121,10 +123,8 @@ class Command(BaseCommand):
             count = Transaction.objects.filter(account=account).delete()[0]
             self.stdout.write(f"  Cleared {count} existing transactions")
 
-        # ── 5. Generate 12 months of Australian transaction history ──
-        now = timezone.now()
-        start_date = now.replace(year=2025, month=1, day=15, hour=9, minute=0, second=0, microsecond=0)
-        end_date = now.replace(year=2026, month=6, day=30, hour=23, minute=59, second=0, microsecond=0)
+        # ── 5. Generate ~18 months of Australian transaction history ──
+        end_date = now.replace(hour=23, minute=59, second=0, microsecond=0) - timedelta(days=1)  # up to yesterday
 
         # Australian-specific transaction descriptions
         deposit_descs = [
@@ -226,7 +226,7 @@ class Command(BaseCommand):
         account.balance = target_balance
         account.save()
         self.stdout.write(self.style.SUCCESS(
-            f"  Generated {txn_count} transactions (Jan 2025 - Jun 2026)"
+            f"  Generated {txn_count} transactions ({start_date.strftime('%b %Y')} - {end_date.strftime('%b %Y')})"
         ))
         self.stdout.write(self.style.SUCCESS(
             f"  Balance set to A${target_balance:,.2f}"
@@ -281,7 +281,7 @@ class Command(BaseCommand):
         self.stdout.write(f"  Account Number:      {account.account_number}")
         self.stdout.write(f"  Currency:            AUD")
         self.stdout.write(f"  Balance:             A${target_balance:,.2f}")
-        self.stdout.write(f"  Account Created:    2025-01-15 (backdated)")
+        self.stdout.write(f"  Account Created:    {backdate.strftime('%Y-%m-%d')} (backdated)")
         self.stdout.write(f"  Completed Deposits: {total_deposits}")
         self.stdout.write(f"  Completed Withdrawals: {total_withdrawals}")
         self.stdout.write(f"  Pending Withdrawal:  A${pending_amount:,.2f}")
